@@ -49,20 +49,89 @@ export default function Status({ onBackToTransactions }) {
   const [soldAmount, setSoldAmount] = useState('');
   const [soldDate, setSoldDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const beneficiary = {
+  const [isEditingBeneficiary, setIsEditingBeneficiary] = useState(false);
+  const [beneficiary, setBeneficiary] = useState({
     municipality: 'Municipality of Paracale',
     name: 'Raymundo, Jan Vincent M.',
     address: 'Paracale',
     sex: 'Male',
     age: 22,
     contact: '0972342634',
-  };
+  });
+
+  const [editingBeneficiary, setEditingBeneficiary] = useState({
+    municipality: 'Municipality of Paracale',
+    name: 'Raymundo, Jan Vincent M.',
+    address: 'Paracale',
+    sex: 'Male',
+    age: 22,
+    contact: '0972342634',
+  });
 
   const toggleStatus = (key) => {
-    setSelectedStatus((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
-    );
+    if (key === 'dead') {
+      if (selectedStatus.includes('dead')) {
+        // Allow unchecking dead
+        setSelectedStatus(selectedStatus.filter(k => k !== 'dead'));
+      } else {
+        // If dead is being selected, clear all other statuses
+        setSelectedStatus(['dead']);
+        setSelectedHealth(''); // Clear health status when dead is selected
+      }
+    } else {
+      // If other status is being selected
+      if (selectedStatus.includes(key)) {
+        // Allow unchecking any status
+        setSelectedStatus(prev => prev.filter(k => k !== key));
+      } else {
+        // If selecting a new status, remove dead if it exists
+        setSelectedStatus((prev) => {
+          const newStatus = prev.filter((k) => k !== 'dead');
+          return [...newStatus, key];
+        });
+      }
+    }
+  };
+
+  const handleHealthSelection = (key) => {
+    // Allow unchecking health status even when dead is selected
+    if (selectedHealth === key) {
+      setSelectedHealth('');
+    } else {
+      // Only allow health selection if dead is not selected
+      if (!selectedStatus.includes('dead')) {
+        setSelectedHealth(key);
+      }
+    }
+  };
+
+  const isStatusDisabled = (key) => {
+    if (key === 'dead') {
+      // Dead is disabled if any other status is selected (but can still be unchecked)
+      return selectedStatus.length > 0 && !selectedStatus.includes('dead');
+    } else {
+      // Other statuses are disabled if dead is selected (but can still be unchecked)
+      return selectedStatus.includes('dead');
+    }
+  };
+
+  const isHealthDisabled = () => {
+    return selectedStatus.includes('dead');
+  };
+
+  const handleEditBeneficiary = () => {
+    setIsEditingBeneficiary(true);
+  };
+
+  const handleSaveBeneficiary = () => {
+    setBeneficiary({ ...editingBeneficiary });
+    setIsEditingBeneficiary(false);
+    Alert.alert('Success', 'Beneficiary information updated successfully!');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingBeneficiary({ ...beneficiary });
+    setIsEditingBeneficiary(false);
   };
 
   const handleSubmit = () => {
@@ -70,7 +139,7 @@ export default function Status({ onBackToTransactions }) {
       Alert.alert('Validation Error', 'Please select at least one status option.');
       return;
     }
-    if (!selectedHealth) {
+    if (!selectedStatus.includes('dead') && !selectedHealth) {
       Alert.alert('Validation Error', 'Please select a health status.');
       return;
     }
@@ -106,33 +175,100 @@ export default function Status({ onBackToTransactions }) {
             <View style={styles.beneficiaryHeader}>
               <View style={styles.beneficiaryHeaderLeft}>
                 <View style={styles.radioDot} />
-                <Text style={styles.beneficiaryTitle}>{beneficiary.municipality}</Text>
+                <Text style={styles.beneficiaryTitle}>
+                  {isEditingBeneficiary ? editingBeneficiary.municipality : beneficiary.municipality}
+                </Text>
               </View>
-              <TouchableOpacity style={styles.editButton}>
-                <Ionicons name="create-outline" size={16} color={colors.white} />
-                <Text style={styles.editButtonText}>EDIT</Text>
-              </TouchableOpacity>
+              {isEditingBeneficiary ? (
+                <View style={styles.editActions}>
+                  <TouchableOpacity style={styles.saveButton} onPress={handleSaveBeneficiary}>
+                    <Ionicons name="checkmark" size={16} color={colors.white} />
+                    <Text style={styles.saveButtonText}>SAVE</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
+                    <Ionicons name="close" size={16} color={colors.primary} />
+                    <Text style={styles.cancelButtonText}>CANCEL</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.editButton} onPress={handleEditBeneficiary}>
+                  <Ionicons name="create-outline" size={16} color={colors.white} />
+                  <Text style={styles.editButtonText}>EDIT</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <View style={styles.beneficiaryDetails}>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Name:</Text>
-                <Text style={styles.beneficiaryValue}>{beneficiary.name}</Text>
+                {isEditingBeneficiary ? (
+                  <TextInput
+                    style={styles.beneficiaryInput}
+                    value={editingBeneficiary.name}
+                    onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, name: text }))}
+                    placeholder="Enter name"
+                    placeholderTextColor={colors.textLight}
+                  />
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.name}</Text>
+                )}
               </View>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Address:</Text>
-                <Text style={styles.beneficiaryValue}>{beneficiary.address}</Text>
+                {isEditingBeneficiary ? (
+                  <TextInput
+                    style={styles.beneficiaryInput}
+                    value={editingBeneficiary.address}
+                    onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, address: text }))}
+                    placeholder="Enter address"
+                    placeholderTextColor={colors.textLight}
+                  />
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.address}</Text>
+                )}
               </View>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Sex:</Text>
-                <Text style={styles.beneficiaryValue}>{beneficiary.sex}</Text>
+                {isEditingBeneficiary ? (
+                  <TextInput
+                    style={styles.beneficiaryInput}
+                    value={editingBeneficiary.sex}
+                    onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, sex: text }))}
+                    placeholder="Enter sex"
+                    placeholderTextColor={colors.textLight}
+                  />
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.sex}</Text>
+                )}
               </View>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Age:</Text>
-                <Text style={styles.beneficiaryValue}>{beneficiary.age}</Text>
+                {isEditingBeneficiary ? (
+                  <TextInput
+                    style={styles.beneficiaryInput}
+                    value={editingBeneficiary.age.toString()}
+                    onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, age: parseInt(text) || 0 }))}
+                    placeholder="Enter age"
+                    placeholderTextColor={colors.textLight}
+                    keyboardType="numeric"
+                  />
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.age}</Text>
+                )}
               </View>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Contact:</Text>
-                <Text style={styles.beneficiaryValue}>{beneficiary.contact}</Text>
+                {isEditingBeneficiary ? (
+                  <TextInput
+                    style={styles.beneficiaryInput}
+                    value={editingBeneficiary.contact}
+                    onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, contact: text }))}
+                    placeholder="Enter contact"
+                    placeholderTextColor={colors.textLight}
+                    keyboardType="phone-pad"
+                  />
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.contact}</Text>
+                )}
               </View>
             </View>
           </View>
@@ -167,33 +303,40 @@ export default function Status({ onBackToTransactions }) {
             <View style={styles.statusOptionsGrid}>
               {statusOptions.map((opt) => {
                 const isSelected = selectedStatus.includes(opt.key);
+                const isDisabled = isStatusDisabled(opt.key);
                 return (
               <TouchableOpacity
                 key={opt.key}
                   style={[
                       styles.statusOptionCard,
-                      isSelected && styles.statusOptionCardSelected
+                      isSelected && styles.statusOptionCardSelected,
+                      isDisabled && styles.statusOptionCardDisabled
                     ]}
                     onPress={() => toggleStatus(opt.key)}
                     activeOpacity={0.7}
                   >
                     <View style={styles.statusOptionContent}>
-                      <View style={styles.statusIconContainer}>
+                      <View style={[
+                        styles.statusIconContainer,
+                        isDisabled && styles.statusIconContainerDisabled
+                      ]}>
                         <Ionicons 
                           name={opt.icon} 
                           size={20} 
-                          color={isSelected ? colors.primary : colors.textLight} 
+                          color={isDisabled ? colors.disabled : (isSelected ? colors.primary : colors.textLight)} 
                         />
                       </View>
                       <Text style={[
                         styles.statusOptionLabel,
-                        isSelected && styles.statusOptionLabelSelected
+                        isSelected && styles.statusOptionLabelSelected,
+                        isDisabled && styles.statusOptionLabelDisabled
                       ]}>
                   {opt.label}
                 </Text>
                       <View style={[
                         styles.statusCheckbox,
-                        isSelected && styles.statusCheckboxSelected
+                        isSelected && styles.statusCheckboxSelected,
+                        isDisabled && styles.statusCheckboxDisabled
                       ]}>
                         {isSelected && (
                           <Ionicons name="checkmark" size={12} color={colors.white} />
@@ -309,33 +452,40 @@ export default function Status({ onBackToTransactions }) {
             <View style={styles.healthOptionsGrid}>
               {healthOptions.map((opt) => {
                 const isSelected = selectedHealth === opt.key;
+                const isDisabled = isHealthDisabled();
                 return (
               <TouchableOpacity
                 key={opt.key}
                     style={[
                       styles.healthOptionCard,
-                      isSelected && styles.healthOptionCardSelected
+                      isSelected && styles.healthOptionCardSelected,
+                      isDisabled && styles.healthOptionCardDisabled
                     ]}
-                onPress={() => setSelectedHealth(opt.key)}
+                onPress={() => handleHealthSelection(opt.key)}
                     activeOpacity={0.7}
                   >
                     <View style={styles.healthOptionContent}>
-                      <View style={styles.healthIconContainer}>
+                      <View style={[
+                        styles.healthIconContainer,
+                        isDisabled && styles.healthIconContainerDisabled
+                      ]}>
                         <Ionicons 
                           name={opt.icon} 
                           size={18} 
-                          color={isSelected ? colors.primary : colors.textLight} 
+                          color={isDisabled ? colors.disabled : (isSelected ? colors.primary : colors.textLight)} 
                         />
                       </View>
                       <Text style={[
                         styles.healthOptionLabel,
-                        isSelected && styles.healthOptionLabelSelected
+                        isSelected && styles.healthOptionLabelSelected,
+                        isDisabled && styles.healthOptionLabelDisabled
                       ]}>
                         {opt.label}
                       </Text>
                       <View style={[
                         styles.healthRadio,
-                        isSelected && styles.healthRadioSelected
+                        isSelected && styles.healthRadioSelected,
+                        isDisabled && styles.healthRadioDisabled
                       ]}>
                         {isSelected && (
                           <View style={styles.healthRadioInner} />
@@ -528,6 +678,52 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
+  beneficiaryInput: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#E3F4EC',
+    color: '#25A18E',
+    flex: 1,
+    minHeight: 36,
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#25A18E',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  cancelButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+  },
+  cancelButtonText: {
+    color: '#25A18E',
+    fontWeight: '700',
+    fontSize: 12,
+    marginLeft: 4,
+  },
   livestockCard: {
     backgroundColor: '#e6f4f1',
     borderRadius: 16,
@@ -575,6 +771,11 @@ const styles = StyleSheet.create({
     borderColor: '#25A18E',
     backgroundColor: '#e6f4f1',
   },
+  statusOptionCardDisabled: {
+    opacity: 0.7,
+    backgroundColor: '#f8f9fa',
+    borderColor: '#E3F4EC',
+  },
   statusOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -588,6 +789,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
   },
+  statusIconContainerDisabled: {
+    backgroundColor: '#E3F4EC',
+    borderColor: '#E3F4EC',
+  },
   statusOptionLabel: {
     fontSize: 15,
     color: '#25A18E',
@@ -597,6 +802,10 @@ const styles = StyleSheet.create({
   statusOptionLabelSelected: {
     color: '#25A18E',
     fontWeight: '600',
+  },
+  statusOptionLabelDisabled: {
+    color: '#BDC3C7',
+    fontWeight: '500',
   },
   statusCheckbox: {
     width: 20,
@@ -612,6 +821,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#25A18E',
     borderColor: '#25A18E',
   },
+  statusCheckboxDisabled: {
+    borderColor: '#E3F4EC',
+    backgroundColor: '#E3F4EC',
+  },
   healthOptionsGrid: {
     gap: 12,
   },
@@ -626,6 +839,11 @@ const styles = StyleSheet.create({
     borderColor: '#25A18E',
     backgroundColor: '#e6f4f1',
   },
+  healthOptionCardDisabled: {
+    opacity: 0.7,
+    backgroundColor: '#f8f9fa',
+    borderColor: '#E3F4EC',
+  },
   healthOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -639,6 +857,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
   },
+  healthIconContainerDisabled: {
+    backgroundColor: '#E3F4EC',
+    borderColor: '#E3F4EC',
+  },
   healthOptionLabel: {
     fontSize: 15,
     color: '#25A18E',
@@ -648,6 +870,10 @@ const styles = StyleSheet.create({
   healthOptionLabelSelected: {
     color: '#25A18E',
     fontWeight: '600',
+  },
+  healthOptionLabelDisabled: {
+    color: '#BDC3C7',
+    fontWeight: '500',
   },
   healthRadio: {
     width: 20,
@@ -662,6 +888,10 @@ const styles = StyleSheet.create({
   healthRadioSelected: {
     backgroundColor: '#25A18E',
     borderColor: '#25A18E',
+  },
+  healthRadioDisabled: {
+    borderColor: '#E3F4EC',
+    backgroundColor: '#E3F4EC',
   },
   healthRadioInner: {
     width: 8,

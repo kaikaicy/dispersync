@@ -29,7 +29,7 @@ export default function App() {
         {/* <Stack.Screen name="Status" component={Status} options={{ headerShown: false }} /> */}
         {/* <Stack.Screen name="Beneficiary" component={Beneficiary} options={{ headerShown: false }} /> */}
         {/* <Stack.Screen name="Dispersal" component={Dispersal} options={{ headerShown: false }} /> */}
-        <Stack.Screen name="INSPECT" component={INSPECT} />
+        <Stack.Screen name="INSPECT" component={INSPECT} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

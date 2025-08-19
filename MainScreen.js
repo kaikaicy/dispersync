@@ -105,12 +105,7 @@ export default function MainScreen({ navigation }) {
 
   // Helper to render main content
   const renderMainContent = () => {
-    if (showBeneficiaries) {
-      return <ListOfBeneficiaries />;
-    }
-    if (showInspect) {
-      return <ListToInspect />;
-    }
+    // First check for special transaction screens
     if (showTransactionScreen === 'Dispersal') {
       return <Dispersal navigation={navigation} onBackToTransactions={() => setShowTransactionScreen('Transaction')} />;
     } else if (showTransactionScreen === 'Cull') {
@@ -119,14 +114,25 @@ export default function MainScreen({ navigation }) {
       return <Beneficiary navigation={navigation} onBackToTransactions={() => setShowTransactionScreen('Transaction')} />;
     } else if (showTransactionScreen === 'Status') {
       return <Status navigation={navigation} onBackToTransactions={() => setShowTransactionScreen('Transaction')} />;
+    }
+    
+    // Then check for other special screens
+    if (showBeneficiaries) {
+      return <ListOfBeneficiaries />;
+    }
+    if (showInspect) {
+      return <ListToInspect />;
+    }
+    
+    // Finally check the active tab
+    if (activeTab === 'Profile') {
+      return <ProfileScreen navigation={navigation} />;
     } else if (activeTab === 'Scan') {
       return <ConnectDeviceScreen onBack={() => setActiveTab('Dashboard')} onConnect={() => setActiveTab('Transaction')} navigation={navigation} />;
-    } else if (activeTab === 'Profile') {
-      return <ProfileScreen navigation={navigation} />;
     } else if (activeTab === 'Transaction') {
       return <Transaction navigation={navigation} onSelectTransaction={setShowTransactionScreen} />;
     } else {
-      // Dashboard content (existing)
+      // Dashboard content (default)
       return (
         <>
           <Text style={styles.sectionTitle}>Summary of Details</Text>
@@ -170,7 +176,7 @@ export default function MainScreen({ navigation }) {
             </View>
             <View style={[styles.largeCard, styles.gradientCard2]}>
               <View style={styles.largeCardContent}>
-                <Ionicons name="medkit" size={32} color="#fff" style={styles.largeCardIcon} />
+                <Ionicons name="business" size={32} color="#fff" style={styles.largeCardIcon} />
                 <View>
                   <Text style={styles.largeCardNumber}>5</Text>
                   <Text style={styles.largeCardLabel}>Livestock Needing Health Checks</Text>
@@ -187,6 +193,7 @@ export default function MainScreen({ navigation }) {
     setNotifModalVisible(false);
     setShowBeneficiaries(false);
     setShowInspect(false);
+    setShowTransactionScreen(null);
     if (choice === 'beneficiaries') {
       setShowBeneficiaries(true);
     } else if (choice === 'inspect') {
@@ -253,6 +260,7 @@ export default function MainScreen({ navigation }) {
                 setActiveTab('Dashboard');
                 setShowBeneficiaries(false);
                 setShowInspect(false);
+                setShowTransactionScreen(null);
               }}
             >
               <FontAwesome name="dashboard" size={22} color="#fff" />
@@ -265,6 +273,7 @@ export default function MainScreen({ navigation }) {
                   setActiveTab('Scan');
                   setShowBeneficiaries(false);
                   setShowInspect(false);
+                  setShowTransactionScreen(null);
                 }}
               >
                 <Ionicons name="scan" size={28} color="#4ca1af" />
@@ -277,6 +286,7 @@ export default function MainScreen({ navigation }) {
                 setActiveTab('Profile');
                 setShowBeneficiaries(false);
                 setShowInspect(false);
+                setShowTransactionScreen(null);
               }}
             >
               <Ionicons name="person-outline" size={22} color="#fff" />
