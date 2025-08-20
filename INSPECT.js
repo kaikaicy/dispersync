@@ -1,61 +1,129 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, StyleSheet, SafeAreaView, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, StyleSheet, SafeAreaView, Platform, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, MaterialIcons, FontAwesome } from '@expo/vector-icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+// 🔥 Firebase
+import { auth, db } from './src/config/firebase'; // adjust path if needed
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // Import logo images
 const leftLogo = require('./assets/images/logoleft.png');
 const rightLogo = require('./assets/images/logoright.png');
 
 const eligibilityCriteria = [
-  "Beneficiary is not a senior citizen (below 60)",
-  "Farmer",
-  "Physically capable to care for livestock",
-  "No full-time job or duty conflict",
-  "Owns or has access to land for livestock",
-  "Has water supply accessible",
-  "Willing to attend training"
+  'Beneficiary is not a senior citizen (below 60)',
+  'Farmer',
+  'Physically capable to care for livestock',
+  'No full-time job or duty conflict',
+  'Owns or has access to land for livestock',
+  'Has water supply accessible',
+  'Willing to attend training',
 ];
 
 const siteSuitability = [
-  "Area is not flood-prone",
-  "Adequate space for livestock",
-  "Can build or has livestock shelter",
-  "Proper fencing for safety"
+  'Area is not flood-prone',
+  'Adequate space for livestock',
+  'Can build or has livestock shelter',
+  'Proper fencing for safety',
 ];
 
-export default function INSPECT({ navigation }) {
-  const [image, setImage] = useState(null);
+export default function INSPECT({ navigation, route }) {
+  const [image, setImage] = useState(null); // local file:// preview
+  const [uploading, setUploading] = useState(false);
+
+  // Optional: get applicantId from route params (preferred),
+  // or add your own input in the form if needed.
+  const applicantIdFromRoute = route?.params?.applicantId || null;
+
   const [form, setForm] = useState({
     fullName: '',
     age: '',
     gender: '',
     contact: '',
-    remarks: ''
+    remarks: '',
+    // applicantId: '' // If you want to type it manually, uncomment and render an input
   });
-  const [eligibility, setEligibility] = useState(Array(eligibilityCriteria.length).fill(false));
+
+  const [eligibility, setEligibility] = useState(
+    Array(eligibilityCriteria.length).fill(false)
+  );
   const [site, setSite] = useState(Array(siteSuitability.length).fill(false));
 
+  // ——————————————————————————————————————————
+  // Permissions + pick/take photo
+  // ——————————————————————————————————————————
+  const ensureLibraryPermission = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'We need access to your photo library to pick an image.');
+      return false;
+    }
+    return true;
+  };
+
+  const ensureCameraPermission = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'We need camera permission to take a photo.');
+      return false;
+    }
+    return true;
+  };
+
   const pickImage = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
+    const ok = await ensureLibraryPermission();
+    if (!ok) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [4, 3],
-      quality: 1,
+      quality: 0.9,
     });
     if (!result.canceled) setImage(result.assets[0].uri);
   };
 
   const takePhoto = async () => {
-    let result = await ImagePicker.launchCameraAsync({
+    const ok = await ensureCameraPermission();
+    if (!ok) return;
+
+    const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [4, 3],
-      quality: 1,
+      quality: 0.9,
     });
     if (!result.canceled) setImage(result.assets[0].uri);
   };
-  
+
+  // ——————————————————————————————————————————
+  // Helpers
+  // ——————————————————————————————————————————
+  // Convert boolean array to index-keyed object: {0:true,1:false,...}
+  const toIndexObject = (arr) => {
+    const o = {};
+    arr.forEach((v, i) => { o[i] = !!v; });
+    return o;
+  };
+
+  // Upload local file:// to Firebase Storage and return https URL
+  const uploadLocalImage = async (localUri, inspectionId) => {
+    if (!localUri || !localUri.startsWith('file://')) return null;
+    const storage = getStorage(); // default app
+    const filename = `documentation_${Date.now()}.jpg`;
+    const path = `inspections/${inspectionId}/${filename}`;
+    const sref = storageRef(storage, path);
+
+    const resp = await fetch(localUri);
+    const blob = await resp.blob(); // Expo supports blob()
+
+    await uploadBytes(sref, blob, { contentType: blob.type || 'image/jpeg' });
+    const url = await getDownloadURL(sref);
+    return url; // https url
+  };
+
   const handleCheckbox = (type, idx) => {
     if (type === 'eligibility') {
       const updated = [...eligibility];
@@ -72,8 +140,67 @@ export default function INSPECT({ navigation }) {
     setForm({ ...form, [field]: value });
   };
 
-  const handleSubmit = () => {
-    // Handle form submission
+  // ——————————————————————————————————————————
+  // Submit inspection: upload image → save doc
+  // ——————————————————————————————————————————
+  const handleSubmit = async () => {
+    try {
+      // 1) Guard: need an applicantId and an inspector (logged-in user)
+      const inspectorId = auth?.currentUser?.uid || null;
+      const applicantId = applicantIdFromRoute || form.applicantId || null;
+
+      if (!inspectorId) {
+        Alert.alert('Not signed in', 'Please sign in first.');
+        return;
+      }
+      if (!applicantId) {
+        Alert.alert('Missing applicant', 'No applicant selected. Pass applicantId in route params or add an input.');
+        return;
+      }
+
+      setUploading(true);
+
+      // 2) Choose an inspection doc id (here we use timestamp; you can use your own)
+      const inspectionId = `${applicantId}_${Date.now()}`;
+
+      // 3) Upload image if we have one
+      let documentationURL = null;
+      if (image && image.startsWith('file://')) {
+        documentationURL = await uploadLocalImage(image, inspectionId);
+      }
+
+      // 4) Build inspection payload
+      const payload = {
+        applicantId,
+        inspectorId,
+        inspectionDate: new Date(), // or serverTimestamp() if you prefer; web ordering should use this field
+        status: 'pending', // or 'completed' if that's your mobile flow
+        eligibilityCriteria: toIndexObject(eligibility), // {0:true,1:false,...}
+        siteSuitability: toIndexObject(site),
+        documentationURL: documentationURL || null,
+        remarks: form.remarks || '',
+        // createdAt: serverTimestamp(), // optional
+      };
+
+      // 5) Save to Firestore
+      const ref = doc(db, 'inspections', inspectionId);
+      await setDoc(ref, payload, { merge: true });
+
+      setUploading(false);
+      Alert.alert('Success', 'Inspection submitted.');
+      // Optionally reset form
+      setImage(null);
+      setForm({ fullName: '', age: '', gender: '', contact: '', remarks: '' });
+      setEligibility(Array(eligibilityCriteria.length).fill(false));
+      setSite(Array(siteSuitability.length).fill(false));
+
+      // Navigate if desired
+      // navigation.navigate('Main');
+    } catch (e) {
+      console.error('Submit inspection failed:', e);
+      setUploading(false);
+      Alert.alert('Error', e?.message || 'Failed to submit inspection.');
+    }
   };
 
   return (
@@ -95,7 +222,7 @@ export default function INSPECT({ navigation }) {
               <Image source={rightLogo} style={styles.logoImage} resizeMode="contain" />
             </View>
           </View>
-          
+
           {/* Search and Icons - Fixed under header */}
           <View style={styles.searchRow}>
             <TextInput
@@ -111,10 +238,10 @@ export default function INSPECT({ navigation }) {
             </TouchableOpacity>
           </View>
         </SafeAreaView>
-        
+
         {/* Middle Content Area - Form content only */}
         <View style={styles.middleContent}>
-          <ScrollView 
+          <ScrollView
             style={styles.scrollView}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
@@ -136,10 +263,10 @@ export default function INSPECT({ navigation }) {
                   style={styles.input}
                   placeholder="Enter Name"
                   value={form.fullName}
-                  onChangeText={text => handleChange('fullName', text)}
+                  onChangeText={(text) => handleChange('fullName', text)}
                 />
               </View>
-              
+
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Age</Text>
                 <TextInput
@@ -147,20 +274,20 @@ export default function INSPECT({ navigation }) {
                   placeholder="Enter Age"
                   keyboardType="numeric"
                   value={form.age}
-                  onChangeText={text => handleChange('age', text)}
+                  onChangeText={(text) => handleChange('age', text)}
                 />
               </View>
-              
+
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Gender</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="Enter Gender"
                   value={form.gender}
-                  onChangeText={text => handleChange('gender', text)}
+                  onChangeText={(text) => handleChange('gender', text)}
                 />
               </View>
-              
+
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Contact Number</Text>
                 <TextInput
@@ -168,7 +295,7 @@ export default function INSPECT({ navigation }) {
                   placeholder="Enter Contact Number"
                   keyboardType="phone-pad"
                   value={form.contact}
-                  onChangeText={text => handleChange('contact', text)}
+                  onChangeText={(text) => handleChange('contact', text)}
                 />
               </View>
 
@@ -228,12 +355,12 @@ export default function INSPECT({ navigation }) {
                   placeholder="Write your summary or recommendation..."
                   multiline
                   value={form.remarks}
-                  onChangeText={text => handleChange('remarks', text)}
+                  onChangeText={(text) => handleChange('remarks', text)}
                 />
               </View>
 
-              <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}>
-                <Text style={styles.submitBtnText}>Submit Inspection</Text>
+              <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={uploading}>
+                <Text style={styles.submitBtnText}>{uploading ? 'Submitting…' : 'Submit Inspection'}</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -242,26 +369,17 @@ export default function INSPECT({ navigation }) {
         {/* Bottom Navigation - Fixed at bottom */}
         <SafeAreaView edges={['bottom']} style={styles.bottomNavContainer}>
           <View style={styles.bottomNav}>
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => navigation.navigate('Main')}
-            >
+            <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Main')}>
               <FontAwesome name="dashboard" size={22} color="#fff" />
               <Text style={styles.navText}>Dashboard</Text>
             </TouchableOpacity>
             <View style={styles.centerButtonWrapper}>
-              <TouchableOpacity
-                style={styles.centerButton}
-                onPress={() => navigation.navigate('Main')}
-              >
+              <TouchableOpacity style={styles.centerButton} onPress={() => navigation.navigate('Main')}>
                 <Ionicons name="scan" size={28} color="#4ca1af" />
               </TouchableOpacity>
               <Text style={styles.centerButtonText}>Scan</Text>
             </View>
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => navigation.navigate('Main')}
-            >
+            <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Main')}>
               <Ionicons name="person-outline" size={22} color="#fff" />
               <Text style={styles.navText}>Profile</Text>
             </TouchableOpacity>
@@ -273,14 +391,8 @@ export default function INSPECT({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: {
-    flex: 1,
-    backgroundColor: '#e6f4f1',
-  },
-  headerContainer: {
-    backgroundColor: '#25A18E',
-    zIndex: 1000,
-  },
+  mainContainer: { flex: 1, backgroundColor: '#e6f4f1' },
+  headerContainer: { backgroundColor: '#25A18E', zIndex: 1000 },
   header: {
     paddingTop: Platform.OS === 'ios' ? 30 : 10,
     paddingBottom: 6,
@@ -298,227 +410,57 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingHorizontal: 16,
   },
-  logoImage: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#fff',
-  },
-  headerTextContainer: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 10,
-  },
-  headerTitle: {
-    textAlign: 'center',
-    fontWeight: '600',
-    fontSize: 13,
-    color: '#fff',
-    marginBottom: 2,
-    flexWrap: 'wrap',
-  },
-  headerSubtitle: {
-    fontSize: 11,
-    color: '#fff',
-    textAlign: 'center',
-    opacity: 0.9,
-    flexWrap: 'wrap',
-  },
+  logoImage: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#fff' },
+  headerTextContainer: { flex: 1, alignItems: 'center', paddingHorizontal: 10 },
+  headerTitle: { textAlign: 'center', fontWeight: '600', fontSize: 13, color: '#fff', marginBottom: 2, flexWrap: 'wrap' },
+  headerSubtitle: { fontSize: 11, color: '#fff', textAlign: 'center', opacity: 0.9, flexWrap: 'wrap' },
   searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    width: '100%',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
+    width: '100%', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E0E0E0',
   },
   searchInput: {
-    flex: 1,
-    marginHorizontal: 8,
-    backgroundColor: '#F5F9F8',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    height: 36,
+    flex: 1, marginHorizontal: 8, backgroundColor: '#F5F9F8', borderRadius: 8, paddingHorizontal: 12, fontSize: 14, height: 36,
   },
-  middleContent: {
-    flex: 1,
-    backgroundColor: '#e6f4f1',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingVertical: 24,
-    paddingBottom: 32,
-  },
+  middleContent: { flex: 1, backgroundColor: '#e6f4f1' },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingVertical: 24, paddingBottom: 32 },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    marginHorizontal: 18,
-    width: '92%',
-    alignSelf: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    marginBottom: 32,
+    backgroundColor: '#fff', borderRadius: 16, padding: 24, marginHorizontal: 18, width: '92%', alignSelf: 'center',
+    elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, marginBottom: 32,
   },
-  sectionTitle: {
-    fontWeight: 'bold',
-    fontSize: 18,
-    color: '#25A18E',
-    marginBottom: 16,
-    marginTop: 24,
-  },
-  input: {
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#E9ECEF',
-    color: '#333',
-  },
-  checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
+  sectionTitle: { fontWeight: 'bold', fontSize: 18, color: '#25A18E', marginBottom: 16, marginTop: 24 },
+  input: { backgroundColor: '#F8F9FA', borderRadius: 12, padding: 16, fontSize: 16, borderWidth: 1, borderColor: '#E9ECEF', color: '#333' },
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   checkbox: {
-    width: 24,
-    height: 24,
-    borderWidth: 2,
-    borderColor: '#25A18E',
-    borderRadius: 6,
-    marginRight: 12,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: 24, height: 24, borderWidth: 2, borderColor: '#25A18E', borderRadius: 6, marginRight: 12,
+    backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center',
   },
-  checkboxChecked: {
-    borderColor: '#25A18E',
-    backgroundColor: '#C8E6C9',
-  },
-  checkboxInner: {
-    width: 14,
-    height: 14,
-    backgroundColor: '#25A18E',
-    borderRadius: 3,
-  },
-  checkboxLabel: {
-    fontSize: 15,
-    color: '#333',
-    flex: 1,
-  },
+  checkboxChecked: { borderColor: '#25A18E', backgroundColor: '#C8E6C9' },
+  checkboxInner: { width: 14, height: 14, backgroundColor: '#25A18E', borderRadius: 3 },
+  checkboxLabel: { fontSize: 15, color: '#333', flex: 1 },
   photoBtn: {
-    backgroundColor: '#25A18E',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    marginHorizontal: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    backgroundColor: '#25A18E', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10, marginHorizontal: 8,
+    elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4,
   },
-  photoBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
+  photoBtnText: { color: '#fff', fontWeight: 'bold' },
   submitBtn: {
-    backgroundColor: '#25A18E',
-    padding: 18,
-    borderRadius: 12,
-    marginTop: 24,
-    alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    backgroundColor: '#25A18E', padding: 18, borderRadius: 12, marginTop: 24, alignItems: 'center',
+    elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4,
   },
-  submitBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 17,
-  },
-  navItem: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  navText: {
-    color: '#fff',
-    fontSize: 11,
-    marginTop: 4,
-    opacity: 0.8,
-  },
-  centerButtonWrapper: {
-    alignItems: 'center',
-    marginTop: -28,
-    flex: 1,
-  },
+  submitBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 17 },
+  navItem: { alignItems: 'center', flex: 1, justifyContent: 'flex-end' },
+  navText: { color: '#fff', fontSize: 11, marginTop: 4, opacity: 0.8 },
+  centerButtonWrapper: { alignItems: 'center', marginTop: -28, flex: 1 },
   centerButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
+    width: 52, height: 52, borderRadius: 26, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center',
+    elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3,
   },
-  centerButtonText: {
-    color: '#fff',
-    fontSize: 11,
-    marginTop: 4,
-  },
-  bottomNavContainer: {
-    backgroundColor: '#25A18E',
-    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
-    paddingTop: 8,
-    zIndex: 1000,
-  },
-  bottomNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'flex-end',
-    height: 56,
-  },
-
-  topIconContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  topIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#C8E6C9',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  instructionText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-  },
-  inputGroup: {
-    marginBottom: 15,
-  },
-  inputLabel: {
-    fontSize: 14,
-    color: '#35796B',
-    marginBottom: 5,
-  },
+  centerButtonText: { color: '#fff', fontSize: 11, marginTop: 4 },
+  bottomNavContainer: { backgroundColor: '#25A18E', paddingBottom: Platform.OS === 'ios' ? 24 : 8, paddingTop: 8, zIndex: 1000 },
+  bottomNav: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', height: 56 },
+  topIconContainer: { alignItems: 'center', marginBottom: 20 },
+  topIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#C8E6C9', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  instructionText: { fontSize: 14, color: '#666', textAlign: 'center' },
+  inputGroup: { marginBottom: 15 },
+  inputLabel: { fontSize: 14, color: '#35796B', marginBottom: 5 },
 });

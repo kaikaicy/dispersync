@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, TextInput, Image, ScrollView, StyleSheet, SafeAreaView, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, TextInput, Image, ScrollView, StyleSheet, SafeAreaView, Platform, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons, MaterialIcons, FontAwesome } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { auth, db } from './src/config/firebase';
+import { collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 // Import logo images
 const leftLogo = require('./assets/images/logoleft.png');
@@ -27,6 +30,11 @@ const siteSuitability = [
 export default function ListToInspect() {
   const [showInspect, setShowInspect] = useState(false);
   const [image, setImage] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userMunicipality, setUserMunicipality] = useState('');
+  const [applicants, setApplicants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedApplicant, setSelectedApplicant] = useState(null);
   const [form, setForm] = useState({
     fullName: '',
     age: '',
@@ -36,6 +44,170 @@ export default function ListToInspect() {
   });
   const [eligibility, setEligibility] = useState(Array(eligibilityCriteria.length).fill(false));
   const [site, setSite] = useState(Array(siteSuitability.length).fill(false));
+
+  // Get current user and their municipality
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setCurrentUser(user);
+        await fetchUserMunicipality(user.uid);
+      } else {
+        setCurrentUser(null);
+        setUserMunicipality('');
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch user's municipality from staff collection
+  const fetchUserMunicipality = async (userId) => {
+    try {
+      console.log('👤 Fetching staff profile for user ID:', userId);
+      
+      const staffDoc = await getDoc(doc(db, 'staff', userId));
+      if (staffDoc.exists()) {
+        const staffData = staffDoc.data();
+        console.log('📋 Staff data found:', staffData);
+        
+        const municipality = staffData.municipality || staffData.municipalityName || staffData.area || '';
+        console.log('🏘️ Staff municipality:', municipality);
+        
+        setUserMunicipality(municipality);
+        if (municipality) {
+          await fetchApplicantsByMunicipality(municipality);
+        } else {
+          console.log('⚠️ No municipality found for staff, showing all applicants');
+          // If no municipality, show all applicants that need inspection
+          await fetchAllApplicantsNeedingInspection();
+        }
+      } else {
+        console.log('❌ Staff profile not found');
+        Alert.alert('Error', 'Staff profile not found');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching user municipality:', error);
+      Alert.alert('Error', 'Failed to fetch user information');
+    }
+  };
+
+  // Fetch all applicants that need inspection (fallback when no municipality)
+  const fetchAllApplicantsNeedingInspection = async () => {
+    try {
+      console.log('🔄 Fetching all applicants needing inspection...');
+      
+      const applicantsRef = collection(db, 'applicants');
+      const allApplicantsQuery = query(applicantsRef);
+      const allApplicantsSnapshot = await getDocs(allApplicantsQuery);
+      
+      const applicantsNeedingInspection = [];
+      allApplicantsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        const status = data.inspectionStatus || data.status || data.inspection || 'pending';
+        
+        // Check if applicant needs inspection
+        if (status === 'pending' || status === 'not started' || status === 'pending inspection' || status === '') {
+          applicantsNeedingInspection.push({
+            id: doc.id,
+            ...data
+          });
+        }
+      });
+      
+      console.log('✅ All applicants needing inspection:', applicantsNeedingInspection.length);
+      setApplicants(applicantsNeedingInspection);
+      
+    } catch (error) {
+      console.error('❌ Error fetching all applicants:', error);
+    }
+  };
+
+  // Fetch applicants that need inspection from the same municipality
+  const fetchApplicantsByMunicipality = async (municipality) => {
+    try {
+      setLoading(true);
+      
+      console.log('🔍 Searching for applicants in municipality:', municipality);
+      
+      // First, let's get ALL applicants to see what fields they actually have
+      const applicantsRef = collection(db, 'applicants');
+      const allApplicantsQuery = query(applicantsRef);
+      const allApplicantsSnapshot = await getDocs(allApplicantsQuery);
+      
+      console.log('📊 Total applicants found:', allApplicantsSnapshot.size);
+      
+      // Log the first few applicants to see their structure
+      allApplicantsSnapshot.forEach((doc, index) => {
+        if (index < 3) { // Only log first 3 for debugging
+          const data = doc.data();
+          console.log(`📋 Applicant ${index + 1}:`, {
+            id: doc.id,
+            name: data.fullName || data.name || 'N/A',
+            municipality: data.municipality || data.municipalityName || data.area || 'N/A',
+            status: data.inspectionStatus || data.status || data.inspection || 'N/A',
+            address: data.address || 'N/A'
+          });
+        }
+      });
+      
+      // Now try the actual query with the municipality filter
+      let q;
+      try {
+        q = query(
+          applicantsRef,
+          where('municipality', '==', municipality)
+        );
+        
+        const municipalitySnapshot = await getDocs(q);
+        console.log('🏘️ Applicants in municipality:', municipalitySnapshot.size);
+        
+        // Filter by inspection status in memory (more flexible)
+        const applicantsList = [];
+        municipalitySnapshot.forEach((doc) => {
+          const data = doc.data();
+          const status = data.inspectionStatus || data.status || data.inspection || 'pending';
+          
+          // Check if applicant needs inspection (pending, not started, etc.)
+          if (status === 'pending' || status === 'not started' || status === 'pending inspection' || status === '') {
+            applicantsList.push({
+              id: doc.id,
+              ...data
+            });
+          }
+        });
+        
+        console.log('✅ Applicants needing inspection:', applicantsList.length);
+        setApplicants(applicantsList);
+        
+      } catch (queryError) {
+        console.error('❌ Query error:', queryError);
+        // Fallback: get all applicants and filter in memory
+        const allApplicants = [];
+        allApplicantsSnapshot.forEach((doc) => {
+          const data = doc.data();
+          const applicantMunicipality = data.municipality || data.municipalityName || data.area || '';
+          const status = data.inspectionStatus || data.status || data.inspection || 'pending';
+          
+          if (applicantMunicipality.toLowerCase().includes(municipality.toLowerCase()) && 
+              (status === 'pending' || status === 'not started' || status === 'pending inspection' || status === '')) {
+            allApplicants.push({
+              id: doc.id,
+              ...data
+            });
+          }
+        });
+        
+        console.log('🔄 Fallback filtering found:', allApplicants.length, 'applicants');
+        setApplicants(allApplicants);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error fetching applicants:', error);
+      Alert.alert('Error', 'Failed to fetch applicants');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
@@ -72,13 +244,54 @@ export default function ListToInspect() {
     setForm({ ...form, [field]: value });
   };
 
-  const handleSubmit = () => {
-    // Handle form submission
-    console.log('Form submitted:', form);
+  const handleApplicantSelect = (applicant) => {
+    setSelectedApplicant(applicant);
+    setForm({
+      fullName: applicant.fullName || applicant.name || '',
+      age: applicant.age || '',
+      gender: applicant.gender || applicant.sex || '',
+      contact: applicant.contact || applicant.phone || '',
+      remarks: ''
+    });
+    setShowInspect(true);
+  };
+
+  const handleSubmit = async () => {
+    try {
+      // Update applicant inspection status and save inspection results
+      if (selectedApplicant) {
+        const inspectionData = {
+          applicantId: selectedApplicant.id,
+          inspectorId: currentUser.uid,
+          inspectionDate: new Date(),
+          eligibilityCriteria: eligibility,
+          siteSuitability: site,
+          remarks: form.remarks,
+          image: image,
+          status: 'completed'
+        };
+
+        // Save to inspections collection
+        await addDoc(collection(db, 'inspections'), inspectionData);
+        
+        // Update applicant status
+        await updateDoc(doc(db, 'applicants', selectedApplicant.id), {
+          inspectionStatus: 'completed',
+          lastInspectionDate: new Date()
+        });
+
+        Alert.alert('Success', 'Inspection completed successfully!');
+        handleBackToList();
+      }
+    } catch (error) {
+      console.error('Error submitting inspection:', error);
+      Alert.alert('Error', 'Failed to submit inspection');
+    }
   };
 
   const handleBackToList = () => {
     setShowInspect(false);
+    setSelectedApplicant(null);
     // Reset form data when going back
     setForm({
       fullName: '',
@@ -92,7 +305,7 @@ export default function ListToInspect() {
     setImage(null);
   };
 
-  // Render the list view
+  // Render the list view with applicants
   const renderListView = () => (
     <View style={{ backgroundColor: '#FFFFE0', flex: 1 }}>
       <View style={{
@@ -106,19 +319,89 @@ export default function ListToInspect() {
       }}>
         <View>
           <Text style={{ fontWeight: 'bold', color: '#25A18E', fontSize: 15 }}>OLDMS</Text>
-          <Text style={{ color: '#888', fontSize: 13 }}>mamamo</Text>
+          <Text style={{ color: '#888', fontSize: 13 }}>
+            {userMunicipality ? `Municipality: ${userMunicipality}` : 'Loading...'}
+          </Text>
         </View>
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#25A18E',
-            borderRadius: 20,
-            paddingHorizontal: 18,
-            paddingVertical: 6
-          }}
-          onPress={() => setShowInspect(true)}
-        >
-          <Text style={{ color: '#fff', fontWeight: 'bold' }}>INSPECT</Text>
-        </TouchableOpacity>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={{ color: '#25A18E', fontSize: 12, marginBottom: 4 }}>
+            {applicants.length} Pending
+          </Text>
+          <TouchableOpacity 
+            style={{ 
+              backgroundColor: '#25A18E', 
+              paddingHorizontal: 12, 
+              paddingVertical: 4, 
+              borderRadius: 8,
+              marginTop: 4
+            }}
+            onPress={() => {
+              if (userMunicipality) {
+                fetchApplicantsByMunicipality(userMunicipality);
+              } else {
+                fetchAllApplicantsNeedingInspection();
+              }
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 10 }}>Refresh</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Applicants List */}
+      <View style={{ flex: 1, padding: 16 }}>
+        {loading ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color="#25A18E" />
+            <Text style={{ marginTop: 16, color: '#666' }}>Loading applicants...</Text>
+          </View>
+        ) : applicants.length === 0 ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <Ionicons name="checkmark-circle" size={64} color="#4CAF50" />
+            <Text style={{ marginTop: 16, fontSize: 18, color: '#666', textAlign: 'center' }}>
+              No pending inspections in {userMunicipality}
+            </Text>
+            <Text style={{ marginTop: 8, fontSize: 14, color: '#999', textAlign: 'center' }}>
+              All applicants in your municipality have been inspected
+            </Text>
+          </View>
+        ) : (
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {applicants.map((applicant, index) => (
+              <TouchableOpacity
+                key={applicant.id}
+                style={styles.applicantCard}
+                onPress={() => handleApplicantSelect(applicant)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.applicantHeader}>
+                  <View style={styles.applicantAvatar}>
+                    <Text style={styles.applicantInitial}>
+                      {(applicant.fullName || applicant.name || 'A').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.applicantInfo}>
+                    <Text style={styles.applicantName}>
+                      {applicant.fullName || applicant.name || 'Unknown Name'}
+                    </Text>
+                    <Text style={styles.applicantDetails}>
+                      {applicant.age ? `${applicant.age} years old` : 'Age not specified'} • {applicant.gender || applicant.sex || 'Gender not specified'}
+                    </Text>
+                    <Text style={styles.applicantAddress}>
+                      {applicant.address || 'Address not specified'}
+                    </Text>
+                  </View>
+                  <View style={styles.applicantStatus}>
+                    <View style={styles.statusBadge}>
+                      <Text style={styles.statusText}>Pending</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#25A18E" />
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
       </View>
     </View>
   );
@@ -154,6 +437,31 @@ export default function ListToInspect() {
               </View>
               <Text style={styles.instructionText}>Complete the inspection details below</Text>
             </View>
+
+            {/* Selected Applicant Info */}
+            {selectedApplicant && (
+              <View style={styles.selectedApplicantInfo}>
+                <Text style={styles.sectionTitle}>Applicant Information</Text>
+                <View style={styles.applicantInfoCard}>
+                  <Text style={styles.applicantInfoText}>
+                    <Text style={styles.applicantInfoLabel}>Name: </Text>
+                    {selectedApplicant.fullName || selectedApplicant.name || 'N/A'}
+                  </Text>
+                  <Text style={styles.applicantInfoText}>
+                    <Text style={styles.applicantInfoLabel}>Age: </Text>
+                    {selectedApplicant.age || 'N/A'}
+                  </Text>
+                  <Text style={styles.applicantInfoText}>
+                    <Text style={styles.applicantInfoLabel}>Gender: </Text>
+                    {selectedApplicant.gender || selectedApplicant.sex || 'N/A'}
+                  </Text>
+                  <Text style={styles.applicantInfoText}>
+                    <Text style={styles.applicantInfoLabel}>Address: </Text>
+                    {selectedApplicant.address || 'N/A'}
+                  </Text>
+                </View>
+              </View>
+            )}
 
             <Text style={styles.sectionTitle}>Personal Information</Text>
             <View style={styles.inputGroup}>
@@ -438,5 +746,94 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#35796B',
     marginBottom: 5,
+  },
+  applicantCard: {
+    backgroundColor: '#F5F9F8',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  applicantHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  applicantAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#25A18E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  applicantInitial: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  applicantInfo: {
+    flex: 1,
+  },
+  applicantName: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#333',
+  },
+  applicantDetails: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  applicantAddress: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  applicantStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: 100,
+  },
+  statusBadge: {
+    backgroundColor: '#FFE082',
+    borderRadius: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  statusText: {
+    color: '#25A18E',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  selectedApplicantInfo: {
+    backgroundColor: '#E6F4F1',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#D0D0D0',
+  },
+  applicantInfoCard: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+  },
+  applicantInfoText: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 4,
+  },
+  applicantInfoLabel: {
+    fontWeight: 'bold',
+    color: '#25A18E',
   },
 });

@@ -2,7 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import SplashScreen from './SplashScreen';
-import LoginPage from './LoginPage';
+import LoginPage from './src/screen/LoginPage';
 import MainScreen from './MainScreen';
 import ConnectDeviceScreen from './ConnectDeviceScreen';
 import ProfileScreen from './ProfileScreen';
