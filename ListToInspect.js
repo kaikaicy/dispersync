@@ -357,7 +357,7 @@ export default function ListToInspect() {
           </View>
         ) : applicants.length === 0 ? (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <Ionicons name="checkmark-circle" size={64} color="#4CAF50" />
+            <Text style={{ fontSize: 64, color: '#4CAF50' }}>✓</Text>
             <Text style={{ marginTop: 16, fontSize: 18, color: '#666', textAlign: 'center' }}>
               No pending inspections in {userMunicipality}
             </Text>
@@ -395,7 +395,7 @@ export default function ListToInspect() {
                     <View style={styles.statusBadge}>
                       <Text style={styles.statusText}>Pending</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={20} color="#25A18E" />
+                    <Text style={{ fontSize: 20, color: '#25A18E' }}>→</Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -423,7 +423,7 @@ export default function ListToInspect() {
               style={styles.backButton}
               onPress={handleBackToList}
             >
-              <Ionicons name="arrow-back" size={24} color="#25A18E" />
+              <Text style={{ fontSize: 24, color: '#25A18E' }}>←</Text>
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Inspection Form</Text>
             <View style={styles.placeholder} />
@@ -433,7 +433,7 @@ export default function ListToInspect() {
             {/* Top Icon */}
             <View style={styles.topIconContainer}>
               <View style={styles.topIcon}>
-                <Ionicons name="clipboard-check" size={40} color="#25A18E" />
+                <Text style={{ fontSize: 40, color: '#25A18E' }}>📋</Text>
               </View>
               <Text style={styles.instructionText}>Complete the inspection details below</Text>
             </View>

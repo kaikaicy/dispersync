@@ -1,15 +1,26 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, StyleSheet, SafeAreaView, Platform, Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Image,
+  ScrollView,
+  StyleSheet,
+  SafeAreaView,
+  Platform,
+  Alert,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, MaterialIcons, FontAwesome } from '@expo/vector-icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-// 🔥 Firebase
-import { auth, db } from './src/config/firebase'; // adjust path if needed
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+// 🔥 Firebase (your required path)
+import { auth, db } from './src/config/firebase';
+import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
-// Import logo images
+// Logos
 const leftLogo = require('./assets/images/logoleft.png');
 const rightLogo = require('./assets/images/logoright.png');
 
@@ -34,17 +45,15 @@ export default function INSPECT({ navigation, route }) {
   const [image, setImage] = useState(null); // local file:// preview
   const [uploading, setUploading] = useState(false);
 
-  // Optional: get applicantId from route params (preferred),
-  // or add your own input in the form if needed.
+  // Preferred: pass this when navigating to INSPECT
   const applicantIdFromRoute = route?.params?.applicantId || null;
 
   const [form, setForm] = useState({
     fullName: '',
-    age: '',
+    age: '',        // 👈 will be auto-filled from Firestore
     gender: '',
     contact: '',
     remarks: '',
-    // applicantId: '' // If you want to type it manually, uncomment and render an input
   });
 
   const [eligibility, setEligibility] = useState(
@@ -52,8 +61,77 @@ export default function INSPECT({ navigation, route }) {
   );
   const [site, setSite] = useState(Array(siteSuitability.length).fill(false));
 
+  // Simple debug area text
+  const [debug, setDebug] = useState('[DEBUG] Waiting to fetch…');
+
   // ——————————————————————————————————————————
-  // Permissions + pick/take photo
+  // Fetch applicant age using document ID in "applicants"
+  // ——————————————————————————————————————————
+  useEffect(() => {
+    const fetchApplicantAge = async () => {
+      try {
+        if (!applicantIdFromRoute) {
+          const msg = '[INSPECT] No applicantId in route params.';
+          console.log(msg);
+          setDebug(msg);
+          return;
+        }
+
+        const ref = doc(db, 'applicants', applicantIdFromRoute);
+        const snap = await getDoc(ref);
+
+        if (!snap.exists()) {
+          const msg = `[INSPECT] No applicant doc found for ID: ${applicantIdFromRoute}`;
+          console.log(msg);
+          setDebug(msg);
+          return;
+        }
+
+        const data = snap.data();
+        console.log('[INSPECT] Applicant doc data:', data);
+        setDebug(
+          `[INSPECT] Loaded applicant ${applicantIdFromRoute}. ` +
+          `Has age: ${typeof data.age === 'number' ? 'yes' : 'no'}, ` +
+          `Has birthday: ${data.birthday ? 'yes' : 'no'}`
+        );
+
+        // If you also want to prefill name when available:
+        if (data.fullName && !form.fullName) {
+          setForm((prev) => ({ ...prev, fullName: data.fullName }));
+        }
+
+        // 1) Use stored age if present
+        if (typeof data.age === 'number') {
+          setForm((prev) => ({ ...prev, age: String(data.age) }));
+          return;
+        }
+
+        // 2) Else compute from birthday Timestamp (Firestore)
+        if (data.birthday?.toDate) {
+          const birthDate = data.birthday.toDate();
+          const now = new Date();
+          let computedAge = now.getFullYear() - birthDate.getFullYear();
+          const m = now.getMonth() - birthDate.getMonth();
+          if (m < 0 || (m === 0 && now.getDate() < birthDate.getDate())) {
+            computedAge--;
+          }
+          setForm((prev) => ({ ...prev, age: String(computedAge) }));
+          setDebug((d) => d + ` | Computed age: ${computedAge}`);
+        } else {
+          setDebug((d) => d + ' | No birthday/age in doc.');
+        }
+      } catch (e) {
+        console.error('[INSPECT] fetchApplicantAge error:', e);
+        setDebug(`[INSPECT] Error fetching applicant: ${e?.message || e}`);
+      }
+    };
+
+    fetchApplicantAge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applicantIdFromRoute]);
+
+  // ——————————————————————————————————————————
+  // Image helpers
   // ——————————————————————————————————————————
   const ensureLibraryPermission = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -99,29 +177,29 @@ export default function INSPECT({ navigation, route }) {
   };
 
   // ——————————————————————————————————————————
-  // Helpers
+  // Submit inspection: upload image → save doc
   // ——————————————————————————————————————————
-  // Convert boolean array to index-keyed object: {0:true,1:false,...}
   const toIndexObject = (arr) => {
     const o = {};
-    arr.forEach((v, i) => { o[i] = !!v; });
+    arr.forEach((v, i) => {
+      o[i] = !!v;
+    });
     return o;
   };
 
-  // Upload local file:// to Firebase Storage and return https URL
   const uploadLocalImage = async (localUri, inspectionId) => {
     if (!localUri || !localUri.startsWith('file://')) return null;
-    const storage = getStorage(); // default app
+    const storage = getStorage();
     const filename = `documentation_${Date.now()}.jpg`;
     const path = `inspections/${inspectionId}/${filename}`;
     const sref = storageRef(storage, path);
 
     const resp = await fetch(localUri);
-    const blob = await resp.blob(); // Expo supports blob()
+    const blob = await resp.blob();
 
     await uploadBytes(sref, blob, { contentType: blob.type || 'image/jpeg' });
     const url = await getDownloadURL(sref);
-    return url; // https url
+    return url;
   };
 
   const handleCheckbox = (type, idx) => {
@@ -140,62 +218,49 @@ export default function INSPECT({ navigation, route }) {
     setForm({ ...form, [field]: value });
   };
 
-  // ——————————————————————————————————————————
-  // Submit inspection: upload image → save doc
-  // ——————————————————————————————————————————
   const handleSubmit = async () => {
     try {
-      // 1) Guard: need an applicantId and an inspector (logged-in user)
       const inspectorId = auth?.currentUser?.uid || null;
-      const applicantId = applicantIdFromRoute || form.applicantId || null;
+      const applicantId = applicantIdFromRoute || null;
 
       if (!inspectorId) {
         Alert.alert('Not signed in', 'Please sign in first.');
         return;
       }
       if (!applicantId) {
-        Alert.alert('Missing applicant', 'No applicant selected. Pass applicantId in route params or add an input.');
+        Alert.alert('Missing applicant', 'No applicant selected. Pass applicantId in route params.');
         return;
       }
 
       setUploading(true);
 
-      // 2) Choose an inspection doc id (here we use timestamp; you can use your own)
       const inspectionId = `${applicantId}_${Date.now()}`;
-
-      // 3) Upload image if we have one
       let documentationURL = null;
       if (image && image.startsWith('file://')) {
         documentationURL = await uploadLocalImage(image, inspectionId);
       }
 
-      // 4) Build inspection payload
       const payload = {
         applicantId,
         inspectorId,
-        inspectionDate: new Date(), // or serverTimestamp() if you prefer; web ordering should use this field
-        status: 'pending', // or 'completed' if that's your mobile flow
-        eligibilityCriteria: toIndexObject(eligibility), // {0:true,1:false,...}
+        inspectionDate: new Date(), // use this for server-side ordering or switch to serverTimestamp()
+        status: 'pending', // or your mobile flow status
+        eligibilityCriteria: toIndexObject(eligibility),
         siteSuitability: toIndexObject(site),
         documentationURL: documentationURL || null,
         remarks: form.remarks || '',
-        // createdAt: serverTimestamp(), // optional
+        createdAt: serverTimestamp(),
       };
 
-      // 5) Save to Firestore
       const ref = doc(db, 'inspections', inspectionId);
       await setDoc(ref, payload, { merge: true });
 
       setUploading(false);
       Alert.alert('Success', 'Inspection submitted.');
-      // Optionally reset form
       setImage(null);
-      setForm({ fullName: '', age: '', gender: '', contact: '', remarks: '' });
+      setForm({ fullName: '', age: form.age, gender: '', contact: '', remarks: '' }); // keep age if you want
       setEligibility(Array(eligibilityCriteria.length).fill(false));
       setSite(Array(siteSuitability.length).fill(false));
-
-      // Navigate if desired
-      // navigation.navigate('Main');
     } catch (e) {
       console.error('Submit inspection failed:', e);
       setUploading(false);
@@ -206,30 +271,22 @@ export default function INSPECT({ navigation, route }) {
   return (
     <SafeAreaProvider>
       <View style={styles.mainContainer}>
-        {/* Header - Fixed at top */}
+        {/* Header */}
         <SafeAreaView edges={['top']} style={styles.headerContainer}>
           <View style={styles.header}>
             <View style={styles.headerLogos}>
               <Image source={leftLogo} style={styles.logoImage} resizeMode="contain" />
               <View style={styles.headerTextContainer}>
-                <Text style={styles.headerTitle}>
-                  Online Livestock Dispersal Monitoring System
-                </Text>
-                <Text style={styles.headerSubtitle}>
-                  Camarines Norte Provincial Veterinarian's Office
-                </Text>
+                <Text style={styles.headerTitle}>Online Livestock Dispersal Monitoring System</Text>
+                <Text style={styles.headerSubtitle}>Camarines Norte Provincial Veterinarian's Office</Text>
               </View>
               <Image source={rightLogo} style={styles.logoImage} resizeMode="contain" />
             </View>
           </View>
 
-          {/* Search and Icons - Fixed under header */}
+          {/* Search / icons */}
           <View style={styles.searchRow}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search..."
-              placeholderTextColor="#b0b0b0"
-            />
+            <TextInput style={styles.searchInput} placeholder="Search..." placeholderTextColor="#b0b0b0" />
             <TouchableOpacity>
               <Ionicons name="notifications-outline" size={24} color="#4ca1af" />
             </TouchableOpacity>
@@ -239,7 +296,7 @@ export default function INSPECT({ navigation, route }) {
           </View>
         </SafeAreaView>
 
-        {/* Middle Content Area - Form content only */}
+        {/* Content */}
         <View style={styles.middleContent}>
           <ScrollView
             style={styles.scrollView}
@@ -257,6 +314,8 @@ export default function INSPECT({ navigation, route }) {
               </View>
 
               <Text style={styles.sectionTitle}>Personal Information</Text>
+
+              {/* Full name (optional prefill) */}
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Full Name</Text>
                 <TextInput
@@ -267,15 +326,21 @@ export default function INSPECT({ navigation, route }) {
                 />
               </View>
 
+              {/* Age (auto-filled from Firestore) */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Age</Text>
+                <Text style={styles.inputLabel}>Age (auto)</Text>
                 <TextInput
-                  style={styles.input}
-                  placeholder="Enter Age"
-                  keyboardType="numeric"
+                  style={[styles.input, { backgroundColor: '#EEF5F3' }]}
+                  placeholder="Auto-loaded from applicant"
                   value={form.age}
-                  onChangeText={(text) => handleChange('age', text)}
+                  editable={false} // make read-only
                 />
+                {/* tiny debug line below the field */}
+                <Text style={{ marginTop: 6, fontSize: 12, color: '#7a7a7a' }}>
+                  {applicantIdFromRoute
+                    ? `Applicant ID: ${applicantIdFromRoute}`
+                    : 'No applicantId passed via route.'}
+                </Text>
               </View>
 
               <View style={styles.inputGroup}>
@@ -362,11 +427,16 @@ export default function INSPECT({ navigation, route }) {
               <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={uploading}>
                 <Text style={styles.submitBtnText}>{uploading ? 'Submitting…' : 'Submit Inspection'}</Text>
               </TouchableOpacity>
+
+              {/* Debug panel */}
+              <View style={{ marginTop: 16, padding: 10, backgroundColor: '#F2FBF7', borderRadius: 8 }}>
+                <Text style={{ fontSize: 12, color: '#2e6b5f' }}>{debug}</Text>
+              </View>
             </View>
           </ScrollView>
         </View>
 
-        {/* Bottom Navigation - Fixed at bottom */}
+        {/* Bottom Navigation */}
         <SafeAreaView edges={['bottom']} style={styles.bottomNavContainer}>
           <View style={styles.bottomNav}>
             <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Main')}>
