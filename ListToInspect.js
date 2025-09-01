@@ -1,31 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, TextInput, Image, ScrollView, StyleSheet, SafeAreaView, Platform, Alert, ActivityIndicator } from 'react-native';
-import { Ionicons, MaterialIcons, FontAwesome } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { auth, db } from './src/config/firebase';
 import { collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
-// Import logo images
-const leftLogo = require('./assets/images/logoleft.png');
-const rightLogo = require('./assets/images/logoright.png');
+  const eligibilityCriteria = [
+    "Beneficiary is not a senior citizen (below 60)",
+    "Farmer",
+    "Physically capable to care for livestock",
+    "No full-time job or duty conflict",
+    "Owns or has access to land for livestock",
+    "Has water supply accessible",
+    "Willing to attend training"
+  ];
 
-const eligibilityCriteria = [
-  "Beneficiary is not a senior citizen (below 60)",
-  "Farmer",
-  "Physically capable to care for livestock",
-  "No full-time job or duty conflict",
-  "Owns or has access to land for livestock",
-  "Has water supply accessible",
-  "Willing to attend training"
-];
-
-const siteSuitability = [
-  "Area is not flood-prone",
-  "Adequate space for livestock",
-  "Can build or has livestock shelter",
-  "Proper fencing for safety"
-];
+  const siteSuitability = [
+    "Area is not flood-prone",
+    "Adequate space for livestock",
+    "Can build or has livestock shelter",
+    "Proper fencing for safety"
+  ];
 
 export default function ListToInspect() {
   const [showInspect, setShowInspect] = useState(false);
@@ -36,14 +32,23 @@ export default function ListToInspect() {
   const [loading, setLoading] = useState(true);
   const [selectedApplicant, setSelectedApplicant] = useState(null);
   const [form, setForm] = useState({
-    fullName: '',
-    age: '',
-    gender: '',
-    contact: '',
     remarks: ''
   });
   const [eligibility, setEligibility] = useState(Array(eligibilityCriteria.length).fill(false));
   const [site, setSite] = useState(Array(siteSuitability.length).fill(false));
+
+  // Color constants - matching Cull.js exactly
+  const colors = {
+    primary: '#25A18E',
+    secondary: '#38b2ac',
+    accent: '#4fd1c5',
+    background: '#e6f4f1',
+    white: '#FFFFFF',
+    text: '#25A18E',
+    textLight: '#666',
+    border: '#E3F4EC',
+    disabled: '#BDC3C7',
+  };
 
   // Get current user and their municipality
   useEffect(() => {
@@ -247,10 +252,6 @@ export default function ListToInspect() {
   const handleApplicantSelect = (applicant) => {
     setSelectedApplicant(applicant);
     setForm({
-      fullName: applicant.fullName || applicant.name || '',
-      age: applicant.age || '',
-      gender: applicant.gender || applicant.sex || '',
-      contact: applicant.contact || applicant.phone || '',
       remarks: ''
     });
     setShowInspect(true);
@@ -294,10 +295,6 @@ export default function ListToInspect() {
     setSelectedApplicant(null);
     // Reset form data when going back
     setForm({
-      fullName: '',
-      age: '',
-      gender: '',
-      contact: '',
       remarks: ''
     });
     setEligibility(Array(eligibilityCriteria.length).fill(false));
@@ -408,105 +405,74 @@ export default function ListToInspect() {
 
   // Render the INSPECT form
   const renderInspectForm = () => (
-    <View style={styles.mainContainer}>
-      {/* Middle Content Area - Form content only */}
-      <View style={styles.middleContent}>
-        <ScrollView 
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: colors.white, borderBottomColor: colors.border }]}>
+        <TouchableOpacity 
+          onPress={handleBackToList} 
+          style={styles.backButton}
+          activeOpacity={0.7}
         >
-          {/* Header */}
-          <View style={styles.headerContainer}>
-            <TouchableOpacity 
-              style={styles.backButton}
-              onPress={handleBackToList}
-            >
-              <Text style={{ fontSize: 24, color: '#25A18E' }}>←</Text>
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Inspection Form</Text>
-            <View style={styles.placeholder} />
+          <Ionicons name="arrow-back" size={24} color={colors.primary} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.primary }]}>Inspection Form</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      {/* Content */}
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={[styles.container, { backgroundColor: colors.white }]}>
+          
+          {/* Top Icon */}
+          <View style={styles.topIconContainer}>
+            <View style={styles.topIcon}>
+              <Text style={{ fontSize: 40, color: '#25A18E' }}>📋</Text>
+            </View>
           </View>
 
-          <View style={styles.card}>
-            {/* Top Icon */}
-            <View style={styles.topIconContainer}>
-              <View style={styles.topIcon}>
-                <Text style={{ fontSize: 40, color: '#25A18E' }}>📋</Text>
+          {/* Page Header */}
+          <View style={styles.pageHeader}>
+            <Text style={[styles.pageTitle, { color: colors.primary }]}>INSPECTION FORM</Text>
+            <Text style={[styles.pageSubtitle, { color: colors.textLight }]}>
+              Complete the inspection details below
+            </Text>
+          </View>
+
+          {/* Selected Applicant Info */}
+          {selectedApplicant && (
+            <View style={styles.section}>
+              <View style={[styles.applicantInfoCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                <Text style={[styles.sectionTitle, { color: colors.primary, marginBottom: 8 }]}>Applicant Information</Text>
+                <Text style={[styles.sectionSubtitle, { color: colors.textLight, marginBottom: 16 }]}>
+                  Details of the selected applicant
+                </Text>
+                <Text style={[styles.applicantInfoText, { color: colors.text }]}>
+                  <Text style={[styles.applicantInfoLabel, { color: colors.primary }]}>Name: </Text>
+                  {selectedApplicant.fullName || selectedApplicant.name || 'N/A'}
+                </Text>
+                <Text style={[styles.applicantInfoText, { color: colors.text }]}>
+                  <Text style={[styles.applicantInfoLabel, { color: colors.primary }]}>Age: </Text>
+                  {selectedApplicant.age || 'N/A'}
+                </Text>
+                <Text style={[styles.applicantInfoText, { color: colors.text }]}>
+                  <Text style={[styles.applicantInfoLabel, { color: colors.primary }]}>Gender: </Text>
+                  {selectedApplicant.gender || selectedApplicant.sex || 'N/A'}
+                </Text>
+                <Text style={[styles.applicantInfoText, { color: colors.text }]}>
+                  <Text style={[styles.applicantInfoLabel, { color: colors.primary }]}>Address: </Text>
+                  {selectedApplicant.address || 'N/A'}
+                </Text>
               </View>
-              <Text style={styles.instructionText}>Complete the inspection details below</Text>
             </View>
+          )}
 
-            {/* Selected Applicant Info */}
-            {selectedApplicant && (
-              <View style={styles.selectedApplicantInfo}>
-                <Text style={styles.sectionTitle}>Applicant Information</Text>
-                <View style={styles.applicantInfoCard}>
-                  <Text style={styles.applicantInfoText}>
-                    <Text style={styles.applicantInfoLabel}>Name: </Text>
-                    {selectedApplicant.fullName || selectedApplicant.name || 'N/A'}
-                  </Text>
-                  <Text style={styles.applicantInfoText}>
-                    <Text style={styles.applicantInfoLabel}>Age: </Text>
-                    {selectedApplicant.age || 'N/A'}
-                  </Text>
-                  <Text style={styles.applicantInfoText}>
-                    <Text style={styles.applicantInfoLabel}>Gender: </Text>
-                    {selectedApplicant.gender || selectedApplicant.sex || 'N/A'}
-                  </Text>
-                  <Text style={styles.applicantInfoText}>
-                    <Text style={styles.applicantInfoLabel}>Address: </Text>
-                    {selectedApplicant.address || 'N/A'}
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            <Text style={styles.sectionTitle}>Personal Information</Text>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Full Name</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter Name"
-                value={form.fullName}
-                onChangeText={text => handleChange('fullName', text)}
-              />
-            </View>
+          {/* Eligibility Criteria Section */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Eligibility Criteria</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>
+              Check the criteria that apply
+            </Text>
             
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Age</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter Age"
-                keyboardType="numeric"
-                value={form.age}
-                onChangeText={text => handleChange('age', text)}
-              />
-            </View>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Gender</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter Gender"
-                value={form.gender}
-                onChangeText={text => handleChange('gender', text)}
-              />
-            </View>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Contact Number</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter Contact Number"
-                keyboardType="phone-pad"
-                value={form.contact}
-                onChangeText={text => handleChange('contact', text)}
-              />
-            </View>
-
-            <Text style={styles.sectionTitle}>Eligibility Criteria</Text>
             {eligibilityCriteria.map((label, idx) => (
               <TouchableOpacity
                 key={label}
@@ -517,11 +483,18 @@ export default function ListToInspect() {
                 <View style={[styles.checkbox, eligibility[idx] && styles.checkboxChecked]}>
                   {eligibility[idx] && <View style={styles.checkboxInner} />}
                 </View>
-                <Text style={styles.checkboxLabel}>{label}</Text>
+                <Text style={[styles.checkboxLabel, { color: colors.text }]}>{label}</Text>
               </TouchableOpacity>
             ))}
+          </View>
 
-            <Text style={styles.sectionTitle}>Site Suitability</Text>
+          {/* Site Suitability Section */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Site Suitability</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>
+              Assess the suitability of the site
+            </Text>
+            
             {siteSuitability.map((label, idx) => (
               <TouchableOpacity
                 key={label}
@@ -532,12 +505,18 @@ export default function ListToInspect() {
                 <View style={[styles.checkbox, site[idx] && styles.checkboxChecked]}>
                   {site[idx] && <View style={styles.checkboxInner} />}
                 </View>
-                <Text style={styles.checkboxLabel}>{label}</Text>
+                <Text style={[styles.checkboxLabel, { color: colors.text }]}>{label}</Text>
               </TouchableOpacity>
             ))}
+          </View>
 
-            {/* Image Picker Section */}
-            <Text style={styles.sectionTitle}>Inspection Documentation</Text>
+          {/* Image Picker Section */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Inspection Documentation</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>
+              Upload photos or take pictures for documentation
+            </Text>
+            
             {image && (
               <Image
                 source={{ uri: image }}
@@ -545,34 +524,48 @@ export default function ListToInspect() {
               />
             )}
             <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 20 }}>
-              <TouchableOpacity onPress={takePhoto} style={styles.photoBtn}>
+              <TouchableOpacity onPress={takePhoto} style={[styles.photoBtn, { backgroundColor: colors.accent }]}>
                 <Text style={styles.photoBtnText}>Take Photo</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={pickImage} style={styles.photoBtn}>
+              <TouchableOpacity onPress={pickImage} style={[styles.photoBtn, { backgroundColor: colors.accent }]}>
                 <Text style={styles.photoBtnText}>Upload Image</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Remarks */}
-            <Text style={styles.sectionTitle}>Additional Remarks</Text>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Summary or Recommendation</Text>
-              <TextInput
-                style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
-                placeholder="Write your summary or recommendation..."
-                multiline
-                value={form.remarks}
-                onChangeText={text => handleChange('remarks', text)}
-              />
-            </View>
-
-            <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}>
-              <Text style={styles.submitBtnText}>Submit Inspection</Text>
-            </TouchableOpacity>
           </View>
-        </ScrollView>
-      </View>
-    </View>
+
+          {/* Remarks Section */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Remarks</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>
+              Additional notes or observations
+            </Text>
+            <TextInput
+              style={[styles.textArea, { borderColor: colors.border, color: colors.text }]}
+              placeholder="Enter remarks here..."
+              placeholderTextColor={colors.textLight}
+              value={form.remarks}
+              onChangeText={(text) => handleChange('remarks', text)}
+              multiline
+              numberOfLines={4}
+            />
+          </View>
+
+          {/* Submit Button */}
+          <TouchableOpacity 
+            style={[
+              styles.submitButton, 
+              { backgroundColor: colors.accent }
+            ]}
+            onPress={handleSubmit}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.submitText, { color: colors.white }]}>
+              SUBMIT FOR VERIFICATION
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 
   return (
@@ -583,143 +576,168 @@ export default function ListToInspect() {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: {
+  safeArea: {
     flex: 1,
-    backgroundColor: '#FFFFE0',
+    backgroundColor: '#e6f4f1',
   },
-  middleContent: {
-    flex: 1,
-    backgroundColor: '#FFFFE0',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E3F4EC',
+    elevation: 2,
+    shadowColor: '#25A18E',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#25A18E',
+  },
+  backButton: {
+    padding: 5,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingVertical: 24,
-    paddingBottom: 32,
+    padding: 18,
   },
-  headerContainer: {
-    flexDirection: 'row',
+  container: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 20,
+    flexGrow: 1,
+  },
+  pageHeader: {
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#E6F4F1',
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    marginBottom: 24,
   },
-  backButton: {
-    padding: 4,
-  },
-  headerTitle: {
+  pageTitle: {
+    fontSize: 20,
+    fontWeight: '700',
     color: '#25A18E',
-    fontSize: 18,
-    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  pageSubtitle: {
+    fontSize: 14,
+    color: '#666',
     textAlign: 'center',
-    flex: 1,
+    fontWeight: '500',
   },
-  placeholder: {
-    width: 28,
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    marginHorizontal: 18,
-    width: '92%',
-    alignSelf: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    marginBottom: 32,
+  section: {
+    marginBottom: 24,
   },
   sectionTitle: {
-    fontWeight: 'bold',
-    fontSize: 18,
-    color: '#25A18E',
-    marginBottom: 16,
-    marginTop: 24,
-  },
-  input: {
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    padding: 16,
     fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#E9ECEF',
-    color: '#333',
+    fontWeight: '700',
+    color: '#25A18E',
+    marginBottom: 4,
   },
-  checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
+  sectionSubtitle: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 16,
+    fontWeight: '500',
+  },
+  checkboxRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginBottom: 8 
   },
   checkbox: {
-    width: 24,
-    height: 24,
-    borderWidth: 2,
-    borderColor: '#25A18E',
-    borderRadius: 6,
+    width: 24, 
+    height: 24, 
+    borderWidth: 2, 
+    borderColor: '#25A18E', 
+    borderRadius: 6, 
     marginRight: 12,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
+    backgroundColor: '#fff', 
+    justifyContent: 'center', 
     alignItems: 'center',
   },
-  checkboxChecked: {
-    borderColor: '#25A18E',
-    backgroundColor: '#C8E6C9',
+  checkboxChecked: { 
+    borderColor: '#25A18E', 
+    backgroundColor: '#C8E6C9' 
   },
-  checkboxInner: {
-    width: 14,
-    height: 14,
-    backgroundColor: '#25A18E',
-    borderRadius: 3,
+  checkboxInner: { 
+    width: 14, 
+    height: 14, 
+    backgroundColor: '#25A18E', 
+    borderRadius: 3 
   },
-  checkboxLabel: {
-    fontSize: 15,
-    color: '#333',
-    flex: 1,
+  checkboxLabel: { 
+    fontSize: 15, 
+    color: '#25A18E', 
+    flex: 1 
   },
   photoBtn: {
-    backgroundColor: '#25A18E',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
+    paddingVertical: 12, 
+    paddingHorizontal: 20, 
+    borderRadius: 10, 
     marginHorizontal: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    elevation: 2, 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.1, 
     shadowRadius: 4,
   },
-  photoBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
+  photoBtnText: { 
+    color: '#fff', 
+    fontWeight: 'bold' 
   },
-  submitBtn: {
-    backgroundColor: '#25A18E',
-    padding: 18,
+  textArea: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: '#E3F4EC',
+    color: '#25A18E',
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  submitButton: {
     borderRadius: 12,
-    marginTop: 24,
+    paddingVertical: 16,
     alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
+    marginBottom: 20,
+    shadowColor: '#25A18E',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  submitBtnText: {
-    color: '#fff',
+  submitText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 16,
+    letterSpacing: 0.5,
+  },
+  applicantInfoCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#E3F4EC',
+  },
+  applicantInfoText: {
+    fontSize: 14,
+    color: '#25A18E',
+    marginBottom: 4,
+  },
+  applicantInfoLabel: {
     fontWeight: 'bold',
-    fontSize: 17,
+    color: '#25A18E',
   },
   topIconContainer: {
     alignItems: 'center',
@@ -738,14 +756,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
-  },
-  inputGroup: {
-    marginBottom: 15,
-  },
-  inputLabel: {
-    fontSize: 14,
-    color: '#35796B',
-    marginBottom: 5,
   },
   applicantCard: {
     backgroundColor: '#F5F9F8',
@@ -812,28 +822,5 @@ const styles = StyleSheet.create({
     color: '#25A18E',
     fontSize: 12,
     fontWeight: 'bold',
-  },
-  selectedApplicantInfo: {
-    backgroundColor: '#E6F4F1',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#D0D0D0',
-  },
-  applicantInfoCard: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 10,
-  },
-  applicantInfoText: {
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 4,
-  },
-  applicantInfoLabel: {
-    fontWeight: 'bold',
-    color: '#25A18E',
   },
 });

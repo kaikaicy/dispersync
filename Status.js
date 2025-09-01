@@ -2,13 +2,9 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-// 🔥 Firebase
-import { auth, db } from './src/config/firebase';
-import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
-
 const livestockDetails = {
   type: 'Swine',
-  id: 'IBHf24o7pFdfS6bvuDnl', // ← this will be saved as `livestockId`
+  id: 'IBHf24o7pFdfS6bvuDnl',
   health: 'Healthy',
   date: '2025-05-23',
 };
@@ -43,7 +39,8 @@ const colors = {
   disabled: '#BDC3C7',
 };
 
-export default function Status({ onBackToTransactions }) {
+export default function Status({ onBackToTransactions, navigation }) {
+  console.log('Status component rendered with navigation:', navigation);
   const [selectedStatus, setSelectedStatus] = useState([]);
   const [selectedHealth, setSelectedHealth] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -72,56 +69,60 @@ export default function Status({ onBackToTransactions }) {
     contact: '0972342634',
   });
 
-  // ——— helpers ———
-  const parseDateToTimestamp = (yyyyMmDd) => {
-    if (!yyyyMmDd) return null;
-    const m = /^\d{4}-\d{2}-\d{2}$/.test(yyyyMmDd);
-    if (!m) return null;
-    const d = new Date(yyyyMmDd + 'T00:00:00');
-    if (isNaN(d.getTime())) return null;
-    return Timestamp.fromDate(d);
-    // (If you prefer server-side time only, you can omit this and store the string.)
-  };
-
   const toggleStatus = (key) => {
     if (key === 'dead') {
       if (selectedStatus.includes('dead')) {
+        // Allow unchecking dead
         setSelectedStatus(selectedStatus.filter(k => k !== 'dead'));
       } else {
+        // If dead is being selected, clear all other statuses
         setSelectedStatus(['dead']);
-        setSelectedHealth('');
+        setSelectedHealth(''); // Clear health status when dead is selected
       }
     } else {
+      // If other status is being selected
       if (selectedStatus.includes(key)) {
+        // Allow unchecking any status
         setSelectedStatus(prev => prev.filter(k => k !== key));
       } else {
-        setSelectedStatus(prev => {
-          const withoutDead = prev.filter(k => k !== 'dead');
-          return [...withoutDead, key];
+        // If selecting a new status, remove dead if it exists
+        setSelectedStatus((prev) => {
+          const newStatus = prev.filter((k) => k !== 'dead');
+          return [...newStatus, key];
         });
       }
     }
   };
 
   const handleHealthSelection = (key) => {
+    // Allow unchecking health status even when dead is selected
     if (selectedHealth === key) {
       setSelectedHealth('');
-    } else if (!selectedStatus.includes('dead')) {
-      setSelectedHealth(key);
+    } else {
+      // Only allow health selection if dead is not selected
+      if (!selectedStatus.includes('dead')) {
+        setSelectedHealth(key);
+      }
     }
   };
 
   const isStatusDisabled = (key) => {
     if (key === 'dead') {
+      // Dead is disabled if any other status is selected (but can still be unchecked)
       return selectedStatus.length > 0 && !selectedStatus.includes('dead');
     } else {
+      // Other statuses are disabled if dead is selected (but can still be unchecked)
       return selectedStatus.includes('dead');
     }
   };
 
-  const isHealthDisabled = () => selectedStatus.includes('dead');
+  const isHealthDisabled = () => {
+    return selectedStatus.includes('dead');
+  };
 
-  const handleEditBeneficiary = () => setIsEditingBeneficiary(true);
+  const handleEditBeneficiary = () => {
+    setIsEditingBeneficiary(true);
+  };
 
   const handleSaveBeneficiary = () => {
     setBeneficiary({ ...editingBeneficiary });
@@ -134,8 +135,7 @@ export default function Status({ onBackToTransactions }) {
     setIsEditingBeneficiary(false);
   };
 
-  // ——— SAVE to Firestore (status collection) ———
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (selectedStatus.length === 0) {
       Alert.alert('Validation Error', 'Please select at least one status option.');
       return;
@@ -144,66 +144,41 @@ export default function Status({ onBackToTransactions }) {
       Alert.alert('Validation Error', 'Please select a health status.');
       return;
     }
-
-    const uid = auth?.currentUser?.uid || null;
-    const email = auth?.currentUser?.email || null;
-
-    // Build minimal payload (NO beneficiary info, NO livestock details)
-    const payload = {
-      livestockId: livestockDetails.id,       // required by your request
-      statuses: selectedStatus,               // array of selected status keys
-      health: selectedStatus.includes('dead') ? null : selectedHealth || null,
-      remarks: remarks.trim() || null,
-      createdBy: { uid, email: email || null },
-      createdAt: serverTimestamp(),
-    };
-
-    // Optional extras tied to certain statuses
-    if (selectedStatus.includes('pregnant')) {
-      payload.pregnancy = {
-        months: monthsPregnant ? Number(monthsPregnant) : null,
-      };
-    }
-    if (selectedStatus.includes('with_calf')) {
-      payload.calf = {
-        ageMonths: calfAge ? Number(calfAge) : null,
-        count: numCalf ? Number(numCalf) : null,
-      };
-    }
-    if (selectedStatus.includes('sold')) {
-      payload.sale = {
-        amount: soldAmount ? Number(soldAmount) : null,
-        date: parseDateToTimestamp(soldDate), // stored as Firestore Timestamp if valid, else null
-        beneficiaryShare30pct: soldAmount ? Number(soldAmount) * 0.3 : null,
-      };
-    }
-
-    try {
-      setIsSubmitting(true);
-      await addDoc(collection(db, 'status'), payload);
+    
+    setIsSubmitting(true);
+    setTimeout(() => {
       setIsSubmitting(false);
       Alert.alert('Success', 'Status submitted successfully for verification!');
-      onBackToTransactions?.();
+      onBackToTransactions();
+    }, 2000);
+  };
 
-      // optional: clear fields after submit
-      setSelectedStatus([]);
-      setSelectedHealth('');
-      setRemarks('');
-      setMonthsPregnant('');
-      setCalfAge('');
-      setNumCalf('');
-      setSoldAmount('');
-      setSoldDate('');
-    } catch (e) {
-      console.error('Failed to save status:', e);
-      setIsSubmitting(false);
-      Alert.alert('Error', e?.message || 'Failed to submit status.');
+  const handleCullingPress = () => {
+    console.log('Culling button pressed - navigating to Cull screen');
+    // Use the MainScreen's navigation system instead of React Navigation
+    if (onBackToTransactions) {
+      // Navigate to Cull screen while maintaining the MainScreen layout
+      onBackToTransactions('Cull');
+    } else {
+      console.log('onBackToTransactions prop is not available');
+      Alert.alert('Navigation Error', 'Unable to navigate to Cull screen. Please try again.');
+    }
+  };
+
+  const handleRedispersalPress = () => {
+    console.log('Redispersal button pressed - navigating to Redispersal screen');
+    // Use the MainScreen's navigation system instead of React Navigation
+    if (onBackToTransactions) {
+      // Navigate to Redispersal screen while maintaining the MainScreen layout
+      onBackToTransactions('Redispersal');
+    } else {
+      console.log('onBackToTransactions prop is not available');
+      Alert.alert('Navigation Error', 'Unable to navigate to Redispersal screen. Please try again.');
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* … UI below unchanged … */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBackToTransactions} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.primary} />
@@ -221,114 +196,108 @@ export default function Status({ onBackToTransactions }) {
             </Text>
           </View>
 
-          {/* Beneficiary Card */}
           <View style={styles.beneficiaryCard}>
             <View style={styles.beneficiaryHeader}>
-              <View style={styles.beneficiaryHeaderLeft}>
-                <View style={styles.radioDot} />
-                <Text style={styles.beneficiaryTitle}>Beneficiary</Text>
-              </View>
-              {!isEditingBeneficiary ? (
+              <Text style={styles.beneficiaryTitle}>
+                {isEditingBeneficiary ? editingBeneficiary.municipality : beneficiary.municipality}
+              </Text>
+              {!isEditingBeneficiary && (
                 <TouchableOpacity style={styles.editButton} onPress={handleEditBeneficiary}>
-                  <Ionicons name="pencil" size={12} color={colors.white} />
-                  <Text style={styles.editButtonText}>Edit</Text>
+                  <Ionicons name="create-outline" size={16} color={colors.white} />
+                  <Text style={styles.editButtonText}>EDIT</Text>
                 </TouchableOpacity>
-              ) : null}
+              )}
             </View>
-
-            {!isEditingBeneficiary ? (
-              <View style={styles.beneficiaryDetails}>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Municipality:</Text>
-                  <Text style={styles.beneficiaryValue}>{beneficiary.municipality}</Text>
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Name:</Text>
-                  <Text style={styles.beneficiaryValue}>{beneficiary.name}</Text>
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Address:</Text>
-                  <Text style={styles.beneficiaryValue}>{beneficiary.address}</Text>
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Sex:</Text>
-                  <Text style={styles.beneficiaryValue}>{beneficiary.sex}</Text>
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Age:</Text>
-                  <Text style={styles.beneficiaryValue}>{beneficiary.age}</Text>
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Contact:</Text>
-                  <Text style={styles.beneficiaryValue}>{beneficiary.contact}</Text>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.beneficiaryDetails}>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Municipality:</Text>
-                  <TextInput
-                    style={styles.beneficiaryInput}
-                    value={editingBeneficiary.municipality}
-                    onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, municipality: text }))}
-                  />
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Name:</Text>
+            <View style={styles.beneficiaryDetails}>
+              <View style={styles.beneficiaryRow}>
+                <Text style={styles.beneficiaryLabel}>Name:</Text>
+                {isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
                     value={editingBeneficiary.name}
                     onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, name: text }))}
+                    placeholder="Enter name"
+                    placeholderTextColor={colors.textLight}
                   />
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Address:</Text>
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.name}</Text>
+                )}
+              </View>
+              <View style={styles.beneficiaryRow}>
+                <Text style={styles.beneficiaryLabel}>Address:</Text>
+                {isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
                     value={editingBeneficiary.address}
                     onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, address: text }))}
+                    placeholder="Enter address"
+                    placeholderTextColor={colors.textLight}
                   />
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Sex:</Text>
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.address}</Text>
+                )}
+              </View>
+              <View style={styles.beneficiaryRow}>
+                <Text style={styles.beneficiaryLabel}>Sex:</Text>
+                {isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
                     value={editingBeneficiary.sex}
                     onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, sex: text }))}
+                    placeholder="Enter sex"
+                    placeholderTextColor={colors.textLight}
                   />
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Age:</Text>
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.sex}</Text>
+                )}
+              </View>
+              <View style={styles.beneficiaryRow}>
+                <Text style={styles.beneficiaryLabel}>Age:</Text>
+                {isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
                     value={editingBeneficiary.age.toString()}
                     onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, age: parseInt(text) || 0 }))}
+                    placeholder="Enter age"
+                    placeholderTextColor={colors.textLight}
                     keyboardType="numeric"
                   />
-                </View>
-                <View style={styles.beneficiaryRow}>
-                  <Text style={styles.beneficiaryLabel}>Contact:</Text>
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.age}</Text>
+                )}
+              </View>
+              <View style={styles.beneficiaryRow}>
+                <Text style={styles.beneficiaryLabel}>Contact:</Text>
+                {isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
                     value={editingBeneficiary.contact}
                     onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, contact: text }))}
+                    placeholder="Enter contact"
+                    placeholderTextColor={colors.textLight}
+                    keyboardType="phone-pad"
                   />
-                </View>
-                <View style={styles.editActions}>
-                  <TouchableOpacity style={styles.saveButton} onPress={handleSaveBeneficiary}>
-                    <Ionicons name="checkmark" size={12} color={colors.white} />
-                    <Text style={styles.saveButtonText}>Save</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
-                    <Ionicons name="close" size={12} color={colors.primary} />
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
+                ) : (
+                  <Text style={styles.beneficiaryValue}>{beneficiary.contact}</Text>
+                )}
               </View>
-            )}
+              {isEditingBeneficiary && (
+                <View style={styles.editActionsContainer}>
+                  <View style={styles.editActions}>
+                    <TouchableOpacity style={styles.saveButton} onPress={handleSaveBeneficiary}>
+                      <Ionicons name="checkmark" size={16} color={colors.white} />
+                      <Text style={styles.saveButtonText}>SAVE</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
+                      <Ionicons name="close" size={16} color={colors.primary} />
+                      <Text style={styles.cancelButtonText}>CANCEL</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </View>
           </View>
 
-          {/* Livestock Details Card */}
           <View style={styles.livestockCard}>
             <Text style={styles.cardTitle}>Livestock Details</Text>
             <View style={styles.livestockDetails}>
@@ -351,84 +320,114 @@ export default function Status({ onBackToTransactions }) {
             </View>
           </View>
 
-          {/* Status Options */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Status Options</Text>
-            <Text style={styles.sectionSubtitle}>Select the current status of the livestock</Text>
+            <Text style={styles.sectionSubtitle}>
+              Check the status of livestock (select all that apply)
+            </Text>
             <View style={styles.statusOptionsGrid}>
-              {statusOptions.map((option) => (
-                <TouchableOpacity
-                  key={option.key}
+              {statusOptions.map((opt) => {
+                const isSelected = selectedStatus.includes(opt.key);
+                const isDisabled = isStatusDisabled(opt.key);
+                return (
+              <TouchableOpacity
+                key={opt.key}
                   style={[
-                    styles.statusOptionCard,
-                    selectedStatus.includes(option.key) && styles.statusOptionCardSelected,
-                    isStatusDisabled(option.key) && styles.statusOptionCardDisabled
-                  ]}
-                  onPress={() => toggleStatus(option.key)}
-                  disabled={isStatusDisabled(option.key)}
-                >
-                  <View style={styles.statusOptionContent}>
-                    <View style={[
-                      styles.statusIconContainer,
-                      isStatusDisabled(option.key) && styles.statusIconContainerDisabled
-                    ]}>
-                      <Ionicons 
-                        name={option.icon} 
-                        size={20} 
-                        color={selectedStatus.includes(option.key) ? colors.primary : colors.textLight} 
-                      />
+                      styles.statusOptionCard,
+                      isSelected && styles.statusOptionCardSelected,
+                      isDisabled && styles.statusOptionCardDisabled
+                    ]}
+                    onPress={() => toggleStatus(opt.key)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.statusOptionContent}>
+                      <View style={[
+                        styles.statusIconContainer,
+                        isDisabled && styles.statusIconContainerDisabled
+                      ]}>
+                        <Ionicons 
+                          name={opt.icon} 
+                          size={20} 
+                          color={isDisabled ? colors.disabled : (isSelected ? colors.primary : colors.textLight)} 
+                        />
+                      </View>
+                      <Text style={[
+                        styles.statusOptionLabel,
+                        isSelected && styles.statusOptionLabelSelected,
+                        isDisabled && styles.statusOptionLabelDisabled
+                      ]}>
+                  {opt.label}
+                </Text>
+                      <View style={[
+                        styles.statusCheckbox,
+                        isSelected && styles.statusCheckboxSelected,
+                        isDisabled && styles.statusCheckboxDisabled
+                      ]}>
+                        {isSelected && (
+                          <Ionicons name="checkmark" size={12} color={colors.white} />
+                        )}
+                      </View>
                     </View>
-                    <Text style={[
-                      styles.statusOptionLabel,
-                      selectedStatus.includes(option.key) && styles.statusOptionLabelSelected,
-                      isStatusDisabled(option.key) && styles.statusOptionLabelDisabled
-                    ]}>
-                      {option.label}
-                    </Text>
-                    <View style={[
-                      styles.statusCheckbox,
-                      selectedStatus.includes(option.key) && styles.statusCheckboxSelected,
-                      isStatusDisabled(option.key) && styles.statusCheckboxDisabled
-                    ]}>
-                      {selectedStatus.includes(option.key) && (
-                        <Ionicons name="checkmark" size={14} color={colors.white} />
-                      )}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
+              </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
-          {/* Additional Details */}
+          {(selectedStatus.includes('pregnant') || selectedStatus.includes('with_calf') || selectedStatus.includes('sold')) && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Additional Details</Text>
+              
           {selectedStatus.includes('pregnant') && (
-            <View style={styles.formCard}>
-              <Text style={styles.formCardTitle}>Pregnancy Details</Text>
-              <Text style={styles.formCardSubtitle}>How many months pregnant?</Text>
+                <View style={styles.formCard}>
+                  <Text style={styles.formCardTitle}>Pregnancy Information</Text>
               <TextInput
-                style={styles.input}
-                placeholder="Enter months (e.g., 3)"
+                    style={styles.input}
+                    placeholder="Enter months of pregnancy"
+                placeholderTextColor={colors.textLight}
                 value={monthsPregnant}
                 onChangeText={setMonthsPregnant}
                 keyboardType="numeric"
               />
+                  
+              {selectedStatus.includes('with_calf') && (
+                <>
+                  <TextInput
+                        style={styles.input}
+                        placeholder="Enter calf age (months)"
+                    placeholderTextColor={colors.textLight}
+                    value={calfAge}
+                    onChangeText={setCalfAge}
+                    keyboardType="numeric"
+                  />
+                  <TextInput
+                        style={styles.input}
+                        placeholder="Enter number of calves"
+                    placeholderTextColor={colors.textLight}
+                    value={numCalf}
+                    onChangeText={setNumCalf}
+                    keyboardType="numeric"
+                  />
+                </>
+              )}
             </View>
           )}
 
-          {selectedStatus.includes('with_calf') && (
-            <View style={styles.formCard}>
-              <Text style={styles.formCardTitle}>Calf Details</Text>
-              <Text style={styles.formCardSubtitle}>Provide information about the calf</Text>
+          {!selectedStatus.includes('pregnant') && selectedStatus.includes('with_calf') && (
+                <View style={styles.formCard}>
+                  <Text style={styles.formCardTitle}>Calf Information</Text>
               <TextInput
-                style={styles.input}
-                placeholder="Calf age in months"
+                    style={styles.input}
+                    placeholder="Enter calf age (months)"
+                placeholderTextColor={colors.textLight}
                 value={calfAge}
                 onChangeText={setCalfAge}
                 keyboardType="numeric"
               />
               <TextInput
-                style={styles.input}
-                placeholder="Number of calves"
+                    style={styles.input}
+                    placeholder="Enter number of calves"
+                placeholderTextColor={colors.textLight}
                 value={numCalf}
                 onChangeText={setNumCalf}
                 keyboardType="numeric"
@@ -437,114 +436,147 @@ export default function Status({ onBackToTransactions }) {
           )}
 
           {selectedStatus.includes('sold') && (
-            <View style={styles.formCard}>
-              <Text style={styles.formCardTitle}>Sale Details</Text>
-              <Text style={styles.formCardSubtitle}>Provide information about the sale</Text>
+                <View style={styles.formCard}>
+                  <Text style={styles.formCardTitle}>Sale Information</Text>
+                  <Text style={styles.formCardSubtitle}>
+                Beneficiary's Share – 30% (B30%S)
+              </Text>
               <TextInput
-                style={styles.input}
-                placeholder="Sale amount (₱)"
+                    style={styles.input}
+                    placeholder="Enter amount sold (₱)"
+                placeholderTextColor={colors.textLight}
                 value={soldAmount}
                 onChangeText={setSoldAmount}
                 keyboardType="numeric"
               />
+              {soldAmount !== '' && !isNaN(Number(soldAmount)) && (
+                    <View style={styles.calculationCard}>
+                      <Text style={styles.calculationLabel}>30% Share:</Text>
+                      <Text style={styles.calculationValue}>
+                        ₱{Number(soldAmount) * 0.3}
+                </Text>
+                    </View>
+              )}
               <TextInput
-                style={styles.input}
-                placeholder="Sale date (YYYY-MM-DD)"
+                    style={styles.input}
+                    placeholder="Enter date sold (YYYY-MM-DD)"
+                placeholderTextColor={colors.textLight}
                 value={soldDate}
                 onChangeText={setSoldDate}
               />
-              {soldAmount && (
-                <View style={styles.calculationCard}>
-                  <Text style={styles.calculationLabel}>Beneficiary Share (30%):</Text>
-                  <Text style={styles.calculationValue}>₱{(Number(soldAmount) * 0.3).toFixed(2)}</Text>
                 </View>
               )}
             </View>
           )}
 
-          {/* Health Options */}
-          {!selectedStatus.includes('dead') && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Health Status</Text>
-              <Text style={styles.sectionSubtitle}>Select the current health condition</Text>
-              <View style={styles.healthOptionsGrid}>
-                {healthOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option.key}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Health Status</Text>
+            <Text style={styles.sectionSubtitle}>
+              Select the current health condition
+            </Text>
+            <View style={styles.healthOptionsGrid}>
+              {healthOptions.map((opt) => {
+                const isSelected = selectedHealth === opt.key;
+                const isDisabled = isHealthDisabled();
+                return (
+              <TouchableOpacity
+                key={opt.key}
                     style={[
                       styles.healthOptionCard,
-                      selectedHealth === option.key && styles.healthOptionCardSelected,
-                      isHealthDisabled() && styles.healthOptionCardDisabled
+                      isSelected && styles.healthOptionCardSelected,
+                      isDisabled && styles.healthOptionCardDisabled
                     ]}
-                    onPress={() => handleHealthSelection(option.key)}
-                    disabled={isHealthDisabled()}
+                onPress={() => handleHealthSelection(opt.key)}
+                    activeOpacity={0.7}
                   >
                     <View style={styles.healthOptionContent}>
                       <View style={[
                         styles.healthIconContainer,
-                        isHealthDisabled() && styles.healthIconContainerDisabled
+                        isDisabled && styles.healthIconContainerDisabled
                       ]}>
                         <Ionicons 
-                          name={option.icon} 
+                          name={opt.icon} 
                           size={18} 
-                          color={selectedHealth === option.key ? colors.primary : colors.textLight} 
+                          color={isDisabled ? colors.disabled : (isSelected ? colors.primary : colors.textLight)} 
                         />
                       </View>
                       <Text style={[
                         styles.healthOptionLabel,
-                        selectedHealth === option.key && styles.healthOptionLabelSelected,
-                        isHealthDisabled() && styles.healthOptionLabelDisabled
+                        isSelected && styles.healthOptionLabelSelected,
+                        isDisabled && styles.healthOptionLabelDisabled
                       ]}>
-                        {option.label}
+                        {opt.label}
                       </Text>
                       <View style={[
                         styles.healthRadio,
-                        selectedHealth === option.key && styles.healthRadioSelected,
-                        isHealthDisabled() && styles.healthRadioDisabled
+                        isSelected && styles.healthRadioSelected,
+                        isDisabled && styles.healthRadioDisabled
                       ]}>
-                        {selectedHealth === option.key && (
+                        {isSelected && (
                           <View style={styles.healthRadioInner} />
                         )}
                       </View>
                     </View>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              </TouchableOpacity>
+                );
+              })}
             </View>
-          )}
+          </View>
 
-          {/* Remarks */}
-          <View style={styles.formCard}>
-            <Text style={styles.formCardTitle}>Additional Remarks</Text>
-            <Text style={styles.formCardSubtitle}>Any additional notes or comments</Text>
-            <TextInput
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Remarks</Text>
+            <Text style={styles.sectionSubtitle}>
+              Additional notes or observations
+            </Text>
+          <TextInput
               style={styles.remarksInput}
-              placeholder="Enter any additional remarks..."
-              value={remarks}
-              onChangeText={setRemarks}
-              multiline
+            placeholder="Enter remarks here..."
+            placeholderTextColor={colors.textLight}
+            value={remarks}
+            onChangeText={setRemarks}
+            multiline
               numberOfLines={4}
             />
           </View>
 
-          {/* Submit Button */}
-          <TouchableOpacity
-            style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+          <TouchableOpacity 
+            style={[
+              styles.submitButton,
+              isSubmitting && styles.submitButtonDisabled
+            ]}
             onPress={handleSubmit}
             disabled={isSubmitting}
+            activeOpacity={0.8}
           >
             <Text style={styles.submitText}>
-              {isSubmitting ? 'Submitting...' : 'Submit Status'}
+              {isSubmitting ? 'SUBMITTING...' : 'SUBMIT STATUS FOR VERIFICATION'}
             </Text>
           </TouchableOpacity>
 
-          {/* Other Configuration Section */}
           <View style={styles.otherConfigSection}>
-            <Text style={styles.otherConfigText}>Other Configuration</Text>
-            <TouchableOpacity style={styles.cullingButton}>
-              <Ionicons name="trash" size={20} color={colors.secondary} />
-              <Text style={styles.cullingText}>Culling</Text>
-            </TouchableOpacity>
+            <Text style={styles.otherConfigText}>
+            OTHER STATUS CONFIGURATION
+          </Text>
+                          <View style={styles.configButtonsContainer}>
+                <TouchableOpacity 
+                  style={styles.cullingButton} 
+                  activeOpacity={0.7}
+                  onPress={handleCullingPress}
+                >
+                  <Ionicons name="cut-outline" size={20} color={colors.secondary} />
+                  <Text style={styles.cullingText}>Culling</Text>
+                </TouchableOpacity>
+                {selectedStatus.includes('with_calf') && (
+                  <TouchableOpacity 
+                    style={styles.redispersalButton} 
+                    activeOpacity={0.7}
+                    onPress={handleRedispersalPress}
+                  >
+                    <Ionicons name="share-outline" size={20} color={colors.primary} />
+                    <Text style={styles.redispersalText}>Re-dispersal</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
           </View>
         </View>
       </ScrollView>
@@ -637,18 +669,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
-  beneficiaryHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  radioDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#38b2ac',
-    marginRight: 8,
-  },
+
   beneficiaryTitle: {
     fontWeight: '700',
     color: '#25A18E',
@@ -699,9 +720,17 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 36,
   },
+  editActionsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 16,
+    marginBottom: 8,
+  },
   editActions: {
     flexDirection: 'row',
     gap: 8,
+    alignItems: 'center',
+    flexShrink: 0,
   },
   saveButton: {
     flexDirection: 'row',
@@ -710,6 +739,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 6,
     paddingHorizontal: 12,
+    elevation: 2,
+    shadowColor: '#25A18E',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
   },
   saveButtonText: {
     color: '#FFFFFF',
@@ -724,8 +758,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 6,
     paddingHorizontal: 12,
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: '#25A18E',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   cancelButtonText: {
     color: '#25A18E',
@@ -1004,6 +1043,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  configButtonsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
   cullingButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1016,6 +1060,22 @@ const styles = StyleSheet.create({
   },
   cullingText: {
     color: '#38b2ac',
+    fontWeight: '700',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  redispersalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+  },
+  redispersalText: {
+    color: '#25A18E',
     fontWeight: '700',
     fontSize: 16,
     marginLeft: 8,

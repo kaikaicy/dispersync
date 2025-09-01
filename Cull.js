@@ -8,8 +8,10 @@ import {
   ScrollView,
   SafeAreaView,
   Alert,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function Cull({ onBackToTransactions }) {
   const [selectedTab, setSelectedTab] = useState('Sold');
@@ -28,6 +30,10 @@ export default function Cull({ onBackToTransactions }) {
   const [saleAmount, setSaleAmount] = useState('');
   const [saleDate, setSaleDate] = useState('');
   const [replacementDetails, setReplacementDetails] = useState('');
+
+  // Date picker states
+  const [showCullDatePicker, setShowCullDatePicker] = useState(false);
+  const [showSaleDatePicker, setShowSaleDatePicker] = useState(false);
 
   // Color constants
   const colors = {
@@ -62,6 +68,32 @@ export default function Cull({ onBackToTransactions }) {
     { label: 'Natural Death', key: 'natural_death', icon: 'close-circle' },
     { label: 'Other', key: 'other', icon: 'ellipsis-horizontal' },
   ];
+
+  // Date handling functions
+  const formatDate = (date) => {
+    if (!date) return '';
+    const d = new Date(date);
+    return d.toISOString().split('T')[0]; // YYYY-MM-DD format for database
+  };
+
+  const formatDateDisplay = (date) => {
+    if (!date) return '';
+    const d = new Date(date);
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const handleDateChange = (event, selectedDate, setDate, setShowPicker) => {
+    if (Platform.OS === 'android') {
+      setShowPicker(false);
+    }
+    if (selectedDate) {
+      setDate(selectedDate);
+    }
+  };
 
   const handleSubmit = () => {
     if (!beneficiaryName.trim()) {
@@ -102,7 +134,7 @@ export default function Cull({ onBackToTransactions }) {
     setTimeout(() => {
       setIsSubmitting(false);
       Alert.alert('Success', 'Cull/Slaughter record submitted successfully for verification!');
-      onBackToTransactions();
+      onBackToTransactions('Status');
     }, 2000);
   };
 
@@ -149,7 +181,7 @@ export default function Cull({ onBackToTransactions }) {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.white, borderBottomColor: colors.border }]}>
         <TouchableOpacity 
-          onPress={onBackToTransactions} 
+          onPress={() => onBackToTransactions('Status')} 
           style={styles.backButton}
           activeOpacity={0.7}
         >
@@ -213,13 +245,16 @@ export default function Cull({ onBackToTransactions }) {
             </Text>
             
             <Text style={[styles.inputLabel, { color: colors.primary }]}>Cull Date</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-              placeholder="Enter cull date (YYYY-MM-DD)"
-              placeholderTextColor={colors.textLight}
-              value={cullDate}
-              onChangeText={setCullDate}
-            />
+            <TouchableOpacity
+              style={[styles.datePickerButton, { borderColor: colors.border }]}
+              onPress={() => setShowCullDatePicker(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.datePickerText, { color: cullDate ? colors.text : colors.textLight }]}>
+                {cullDate ? formatDateDisplay(cullDate) : 'Select cull date'}
+              </Text>
+              <Ionicons name="calendar" size={20} color={colors.primary} />
+            </TouchableOpacity>
 
             <Text style={[styles.inputLabel, { color: colors.primary }]}>Cull Reason</Text>
             <TextInput
@@ -295,24 +330,39 @@ export default function Cull({ onBackToTransactions }) {
                 )}
               </View>
 
-              <Text style={[styles.inputLabel, { color: colors.primary }]}>Sale Amount (₱)</Text>
+              <Text style={[styles.inputLabel, { color: colors.primary }]}>Amount sold (₱)</Text>
               <TextInput
                 style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-                placeholder="Enter sale amount"
+                placeholder="Enter amount sold"
                 placeholderTextColor={colors.textLight}
                 value={saleAmount}
                 onChangeText={setSaleAmount}
                 keyboardType="numeric"
               />
+              
+              {/* Beneficiary 30% Share Calculation */}
+              {saleAmount && !isNaN(parseFloat(saleAmount)) && (
+                <View style={styles.calculationContainer}>
+                  <Text style={[styles.calculationLabel, { color: colors.textLight }]}>
+                    Beneficiary 30% Share
+                  </Text>
+                  <Text style={[styles.calculationAmount, { color: colors.primary }]}>
+                    ₱{(parseFloat(saleAmount) * 0.3).toFixed(2)}
+                  </Text>
+                </View>
+              )}
 
               <Text style={[styles.inputLabel, { color: colors.primary }]}>Sale Date</Text>
-              <TextInput
-                style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-                placeholder="Enter sale date (YYYY-MM-DD)"
-                placeholderTextColor={colors.textLight}
-                value={saleDate}
-                onChangeText={setSaleDate}
-              />
+              <TouchableOpacity
+                style={[styles.datePickerButton, { borderColor: colors.border }]}
+                onPress={() => setShowSaleDatePicker(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.datePickerText, { color: saleDate ? colors.text : colors.textLight }]}>
+                  {saleDate ? formatDateDisplay(saleDate) : 'Select sale date'}
+                </Text>
+                <Ionicons name="calendar" size={20} color={colors.primary} />
+              </TouchableOpacity>
             </View>
           )}
 
@@ -380,6 +430,76 @@ export default function Cull({ onBackToTransactions }) {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Date Pickers */}
+      {showCullDatePicker && (
+        <DateTimePicker
+          value={cullDate || new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(event, selectedDate) => 
+            handleDateChange(event, selectedDate, setCullDate, setShowCullDatePicker)
+          }
+          maximumDate={new Date()}
+        />
+      )}
+
+      {showSaleDatePicker && (
+        <DateTimePicker
+          value={saleDate || new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(event, selectedDate) => 
+            handleDateChange(event, selectedDate, setSaleDate, setShowSaleDatePicker)
+          }
+          maximumDate={new Date()}
+        />
+      )}
+
+      {/* iOS Date Picker Modal */}
+      {Platform.OS === 'ios' && (showCullDatePicker || showSaleDatePicker) && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => {
+                setShowCullDatePicker(false);
+                setShowSaleDatePicker(false);
+              }}>
+                <Text style={[styles.modalButton, { color: colors.primary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: colors.primary }]}>Select Date</Text>
+              <TouchableOpacity onPress={() => {
+                setShowCullDatePicker(false);
+                setShowSaleDatePicker(false);
+              }}>
+                <Text style={[styles.modalButton, { color: colors.primary }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            {showCullDatePicker && (
+              <DateTimePicker
+                value={cullDate || new Date()}
+                mode="date"
+                display="spinner"
+                onChange={(event, selectedDate) => 
+                  handleDateChange(event, selectedDate, setCullDate, setShowCullDatePicker)
+                }
+                maximumDate={new Date()}
+              />
+            )}
+            {showSaleDatePicker && (
+              <DateTimePicker
+                value={saleDate || new Date()}
+                mode="date"
+                display="spinner"
+                onChange={(event, selectedDate) => 
+                  handleDateChange(event, selectedDate, setSaleDate, setShowSaleDatePicker)
+                }
+                maximumDate={new Date()}
+              />
+            )}
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -570,5 +690,80 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
     letterSpacing: 0.5,
+  },
+  calculationContainer: {
+    backgroundColor: '#F8FFFE',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E3F4EC',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  calculationLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+  },
+  calculationAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#25A18E',
+  },
+  datePickerButton: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E3F4EC',
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  datePickerText: {
+    fontSize: 15,
+    color: '#25A18E',
+    flex: 1,
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    width: '100%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E3F4EC',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#25A18E',
+  },
+  modalButton: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#25A18E',
   },
 });

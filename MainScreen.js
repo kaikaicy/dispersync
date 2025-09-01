@@ -10,6 +10,7 @@ import Dispersal from './Dispersal';
 import Cull from './Cull';
 import Status from './Status';
 import Beneficiary from './Beneficiary';
+import Redispersal from './Redispersal';
 import ListOfBeneficiaries from './ListOfBeneficiaries';
 import ListToInspect from './ListToInspect';
 
@@ -109,11 +110,37 @@ export default function MainScreen({ navigation }) {
     if (showTransactionScreen === 'Dispersal') {
       return <Dispersal navigation={navigation} onBackToTransactions={() => setShowTransactionScreen('Transaction')} />;
     } else if (showTransactionScreen === 'Cull') {
-      return <Cull navigation={navigation} onBackToTransactions={() => setShowTransactionScreen('Transaction')} />;
+      return <Cull navigation={navigation} onBackToTransactions={(screen) => {
+        if (screen === 'Status') {
+          setShowTransactionScreen('Status');
+        } else {
+          setShowTransactionScreen('Transaction');
+        }
+      }} />;
     } else if (showTransactionScreen === 'Beneficiary') {
       return <Beneficiary navigation={navigation} onBackToTransactions={() => setShowTransactionScreen('Transaction')} />;
     } else if (showTransactionScreen === 'Status') {
-      return <Status navigation={navigation} onBackToTransactions={() => setShowTransactionScreen('Transaction')} />;
+      return <Status navigation={navigation} onBackToTransactions={(screen) => {
+        console.log('Status screen navigation called with screen:', screen);
+        if (screen === 'Cull') {
+          console.log('Navigating to Cull screen');
+          setShowTransactionScreen('Cull');
+        } else if (screen === 'Redispersal') {
+          console.log('Navigating to Redispersal screen');
+          setShowTransactionScreen('Redispersal');
+        } else {
+          console.log('Navigating back to Transaction screen');
+          setShowTransactionScreen('Transaction');
+        }
+      }} />;
+    } else if (showTransactionScreen === 'Redispersal') {
+      return <Redispersal navigation={navigation} onBackToTransactions={(screen) => {
+        if (screen === 'Status') {
+          setShowTransactionScreen('Status');
+        } else {
+          setShowTransactionScreen('Transaction');
+        }
+      }} />;
     }
     
     // Then check for other special screens
