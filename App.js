@@ -25,10 +25,10 @@ export default function App() {
         <Stack.Screen name="ConnectDeviceScreen" component={ConnectDeviceScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Profile" component={ProfileScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Transaction" component={Transaction} options={{ headerShown: false }} />
-        {/* <Stack.Screen name="Cull" component={Cull} options={{ headerShown: false }} /> */}
-        {/* <Stack.Screen name="Status" component={Status} options={{ headerShown: false }} /> */}
-        {/* <Stack.Screen name="Beneficiary" component={Beneficiary} options={{ headerShown: false }} /> */}
-        {/* <Stack.Screen name="Dispersal" component={Dispersal} options={{ headerShown: false }} /> */}
+        <Stack.Screen name="Cull" component={Cull} options={{ headerShown: false }} />
+        <Stack.Screen name="Status" component={Status} options={{ headerShown: false }} />
+        <Stack.Screen name="Beneficiary" component={Beneficiary} options={{ headerShown: false }} />
+        <Stack.Screen name="Dispersal" component={Dispersal} options={{ headerShown: false }} />
         <Stack.Screen name="INSPECT" component={INSPECT} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>

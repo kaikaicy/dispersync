@@ -1,26 +1,69 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { auth, db } from './src/config/firebase';
+import { signOut, onAuthStateChanged } from 'firebase/auth';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 const avatar = require('./assets/images/chick.png'); // Placeholder avatar image
 
 export default function ProfileScreen({ navigation }) {
-  // Dummy user data (replace with real data as needed)
-  const user = {
-    id: '123456',
-    name: 'Juan Dela Cruz',
-    email: 'juan@email.com',
-    address: 'Field Staff in Basud',
-    verified: true,
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let unsubscribeDoc = null;
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      if (!currentUser) {
+        setError('Not signed in');
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
+      const ref = doc(db, 'staff', currentUser.uid);
+      unsubscribeDoc = onSnapshot(ref, (snap) => {
+        if (!snap.exists()) {
+          setError('Profile not found');
+          setUser(null);
+        } else {
+          const data = snap.data();
+          setUser({
+            userId: data.userId || '',
+            name: data.name || '',
+            email: data.email || '',
+            municipality: data.municipality || '',
+            barangay: data.barangay || '',
+            status: data.status || '',
+          });
+          setError('');
+        }
+        setLoading(false);
+      }, (err) => {
+        setError(err?.message || 'Failed to load profile');
+        setLoading(false);
+      });
+    });
+
+    return () => {
+      if (unsubscribeDoc) unsubscribeDoc();
+      if (unsubscribeAuth) unsubscribeAuth();
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      // ignore
+    }
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   };
 
-  const handleLogout = () => {
-    // Navigate to Login screen and clear the navigation stack
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'Login' }],
-    });
-  };
+  const roleText = user?.municipality ? `Field Staff in ${user.municipality}` : '';
+  const addressText = user ? `${user.barangay || ''}${user.barangay && user.municipality ? ', ' : ''}${user.municipality || ''}` : '';
+  const isActive = (user?.status || '').toLowerCase() === 'active';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -28,24 +71,46 @@ export default function ProfileScreen({ navigation }) {
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
-        <View style={styles.avatarSection}>
-          <Image source={avatar} style={styles.avatar} />
-          <Text style={styles.name}>{user.name}</Text>
-          <Text style={styles.address}>{user.address}</Text>
-        </View>
-        <View style={styles.statsRow}>
-          <View style={styles.statBox}>
-            <Text style={styles.statLabel}>User ID</Text>
-            <Text style={styles.statValue}>{user.id}</Text>
+
+        {loading ? (
+          <View style={{ paddingVertical: 40 }}>
+            <ActivityIndicator size="large" color="#25A18E" />
           </View>
-        </View>
-        <View style={styles.infoSection}>
-          <Text style={styles.infoLabel}>E-mail</Text>
-          <Text style={styles.infoValue}>{user.email}</Text>
-        </View>
-        <TouchableOpacity style={styles.statusBtn}>
-          <Text style={styles.statusText}>Verification Status</Text>
-        </TouchableOpacity>
+        ) : error ? (
+          <View style={{ paddingVertical: 16 }}>
+            <Text style={{ color: '#E74C3C', textAlign: 'center' }}>{error}</Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.avatarSection}>
+              <Image source={avatar} style={styles.avatar} />
+              <Text style={styles.name}>{user?.name}</Text>
+              {!!roleText && <Text style={styles.roleText}>{roleText}</Text>}
+              <View style={styles.badgeRow}>
+                <View style={[styles.statusBadge, isActive ? styles.statusActive : styles.statusInactive]}>
+                  <Text style={[styles.statusBadgeText, !isActive && { color: '#6b7280' }]}>{(user?.status || 'Unknown').toUpperCase()}</Text>
+                </View>
+              </View>
+            </View>
+            <View style={styles.statsRow}>
+              <View style={styles.statBox}>
+                <Text style={styles.statLabel}>User ID</Text>
+                <Text style={styles.statValue}>{user?.userId || ''}</Text>
+              </View>
+            </View>
+            <View style={styles.infoSection}>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Email</Text>
+                <Text style={styles.infoValue}>{user?.email || ''}</Text>
+              </View>
+              <View style={styles.infoDivider} />
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Address</Text>
+                <Text style={styles.infoValue}>{addressText || ''}</Text>
+              </View>
+            </View>
+          </>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -105,6 +170,12 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     textAlign: 'center',
   },
+  roleText: {
+    fontSize: 14,
+    color: '#4b5563',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
   address: {
     fontSize: 14,
     color: '#666',
@@ -140,36 +211,59 @@ const styles = StyleSheet.create({
   },
   infoSection: {
     width: '100%',
-    backgroundColor: '#E3F4EC',
+    backgroundColor: '#fff',
     borderRadius: 14,
-    paddingVertical: 12,
+    paddingVertical: 8,
     paddingHorizontal: 16,
     marginBottom: 18,
-    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  infoRow: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  infoDivider: {
+    height: 1,
+    backgroundColor: '#EAEAEA',
   },
   infoLabel: {
-    color: '#666',
+    color: '#6b7280',
     fontSize: 14,
     fontWeight: '500',
-    marginBottom: 2,
   },
   infoValue: {
     color: '#222',
     fontSize: 15,
     fontWeight: '600',
   },
-  statusBtn: {
-    width: '100%',
-    backgroundColor: '#25A18E',
-    borderRadius: 24,
-    paddingVertical: 16,
+  badgeRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 6,
   },
-  statusText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  statusActive: {
+    backgroundColor: '#E3F4EC',
+    borderColor: '#25A18E',
+  },
+  statusInactive: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#D1D5DB',
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    color: '#25A18E',
+    fontWeight: '700',
     letterSpacing: 0.5,
   },
 }); 
