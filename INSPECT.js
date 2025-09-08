@@ -251,7 +251,13 @@ export default function INSPECT({ navigation, route }) {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.white, borderBottomColor: colors.border }]}>
         <TouchableOpacity 
-          onPress={() => navigation.navigate('Main')} 
+          onPress={() => {
+            if (navigation && typeof navigation.goBack === 'function') {
+              navigation.goBack();
+            } else if (navigation && typeof navigation.navigate === 'function') {
+              navigation.navigate('Main');
+            }
+          }} 
           style={styles.backButton}
           activeOpacity={0.7}
         >
@@ -317,28 +323,7 @@ export default function INSPECT({ navigation, route }) {
             ))}
           </View>
 
-          {/* Image Picker Section */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Inspection Documentation</Text>
-            <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>
-              Upload photos or take pictures for documentation
-            </Text>
-            
-            {image && (
-              <Image
-                source={{ uri: image }}
-                style={{ width: 250, height: 250, marginBottom: 16, borderRadius: 10, alignSelf: 'center' }}
-              />
-            )}
-            <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 20 }}>
-              <TouchableOpacity onPress={takePhoto} style={[styles.photoBtn, { backgroundColor: colors.accent }]}>
-                <Text style={styles.photoBtnText}>Take Photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={pickImage} style={[styles.photoBtn, { backgroundColor: colors.accent }]}>
-                <Text style={styles.photoBtnText}>Upload Image</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          {/* Image Picker Section removed from Inspection form */}
 
           {/* Remarks Section */}
           <View style={styles.section}>

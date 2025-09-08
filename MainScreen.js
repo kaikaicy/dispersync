@@ -13,6 +13,7 @@ import Beneficiary from './Beneficiary';
 import Redispersal from './Redispersal';
 import ListOfBeneficiaries from './ListOfBeneficiaries';
 import ListToInspect from './ListToInspect';
+import Transfer from './Transfer';
 
 // Import logo images
 const leftLogo = require('./assets/images/logoleft.png');
@@ -128,6 +129,9 @@ export default function MainScreen({ navigation }) {
         } else if (screen === 'Redispersal') {
           console.log('Navigating to Redispersal screen');
           setShowTransactionScreen('Redispersal');
+        } else if (screen === 'Transfer') {
+          console.log('Navigating to Transfer screen');
+          setShowTransactionScreen('Transfer');
         } else {
           console.log('Navigating back to Transaction screen');
           setShowTransactionScreen('Transaction');
@@ -135,6 +139,14 @@ export default function MainScreen({ navigation }) {
       }} />;
     } else if (showTransactionScreen === 'Redispersal') {
       return <Redispersal navigation={navigation} onBackToTransactions={(screen) => {
+        if (screen === 'Status') {
+          setShowTransactionScreen('Status');
+        } else {
+          setShowTransactionScreen('Transaction');
+        }
+      }} />;
+    } else if (showTransactionScreen === 'Transfer') {
+      return <Transfer navigation={navigation} onBackToTransactions={(screen) => {
         if (screen === 'Status') {
           setShowTransactionScreen('Status');
         } else {

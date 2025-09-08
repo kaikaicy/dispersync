@@ -181,7 +181,7 @@ export default function Cull({ onBackToTransactions }) {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.white, borderBottomColor: colors.border }]}>
         <TouchableOpacity 
-          onPress={() => onBackToTransactions('Status')} 
+          onPress={() => onBackToTransactions('Transaction')} 
           style={styles.backButton}
           activeOpacity={0.7}
         >

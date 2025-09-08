@@ -567,14 +567,24 @@ export default function Status({ onBackToTransactions, navigation }) {
                   <Text style={styles.cullingText}>Culling</Text>
                 </TouchableOpacity>
                 {selectedStatus.includes('with_calf') && (
-                  <TouchableOpacity 
-                    style={styles.redispersalButton} 
-                    activeOpacity={0.7}
-                    onPress={handleRedispersalPress}
-                  >
-                    <Ionicons name="share-outline" size={20} color={colors.primary} />
-                    <Text style={styles.redispersalText}>Re-dispersal</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity 
+                      style={styles.redispersalButton} 
+                      activeOpacity={0.7}
+                      onPress={handleRedispersalPress}
+                    >
+                      <Ionicons name="share-outline" size={20} color={colors.primary} />
+                      <Text style={styles.redispersalText}>Re-dispersal</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.redispersalButton} 
+                      activeOpacity={0.7}
+                      onPress={() => onBackToTransactions && onBackToTransactions('Transfer')}
+                    >
+                      <Ionicons name="swap-horizontal-outline" size={20} color={colors.primary} />
+                      <Text style={styles.redispersalText}>Transfer</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
           </View>
@@ -1045,18 +1055,22 @@ const styles = StyleSheet.create({
   },
   configButtonsContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
     gap: 12,
     alignItems: 'center',
+    rowGap: 12,
   },
   cullingButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: '#38b2ac',
+    maxWidth: '46%',
   },
   cullingText: {
     color: '#38b2ac',
@@ -1069,10 +1083,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: '#25A18E',
+    maxWidth: '46%',
   },
   redispersalText: {
     color: '#25A18E',

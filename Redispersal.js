@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert, Modal } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert, Modal, Image } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 
 const colors = {
@@ -41,6 +42,7 @@ export default function Redispersal({ onBackToTransactions, navigation }) {
   const [selectedPurpose, setSelectedPurpose] = useState('');
   const [otherPurpose, setOtherPurpose] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [image, setImage] = useState(null);
 
   // Search functionality states
   const [searchTerm, setSearchTerm] = useState('');
@@ -97,6 +99,26 @@ export default function Redispersal({ onBackToTransactions, navigation }) {
         setOtherPurpose('');
       }
     }
+  };
+
+  // Documentation image helpers
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.9,
+    });
+    if (!result.canceled) setImage(result.assets[0].uri);
+  };
+
+  const takePhoto = async () => {
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.9,
+    });
+    if (!result.canceled) setImage(result.assets[0].uri);
   };
 
   const handleSubmit = () => {
@@ -365,6 +387,26 @@ export default function Redispersal({ onBackToTransactions, navigation }) {
             )}
           </View>
 
+          {/* Documentation Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Documentation</Text>
+            <Text style={{ color: colors.textLight, marginBottom: 16 }}>Upload photos or take pictures for documentation</Text>
+            {image && (
+              <Image
+                source={{ uri: image }}
+                style={{ width: 250, height: 250, marginBottom: 16, borderRadius: 10, alignSelf: 'center' }}
+              />
+            )}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 20 }}>
+              <TouchableOpacity onPress={takePhoto} style={[styles.photoBtn, { backgroundColor: colors.accent }]}>
+                <Text style={styles.photoBtnText}>Take Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={pickImage} style={[styles.photoBtn, { backgroundColor: colors.accent }]}>
+                <Text style={styles.photoBtnText}>Upload Image</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {/* Submit Button */}
           <TouchableOpacity 
             style={[
@@ -611,6 +653,17 @@ const styles = StyleSheet.create({
   modalItem: { paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#E3F4EC' },
   modalButton: { marginTop: 16, padding: 12, borderRadius: 8, alignItems: 'center' },
   modalButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 16 },
+  photoBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    marginHorizontal: 8,
+    elevation: 2,
+  },
+  photoBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
 });
 
 

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Platform, Modal, Alert, SafeAreaView
+  ScrollView, Platform, Modal, Alert, SafeAreaView, Image
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -35,6 +36,7 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
   // Form state
   // ————————————————————————————————————————
   const [currentBeneficiary, setCurrentBeneficiary] = useState('');
+  const [image, setImage] = useState(null);
   const [selectedApplicant, setSelectedApplicant] = useState(null); // {id, fullName, municipality, barangay, address?, gender?, birthday?, contact?, livestock?}
   const [applicantResults, setApplicantResults] = useState([]);
   const [showApplicantModal, setShowApplicantModal] = useState(false);
@@ -58,6 +60,28 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
     'Basud','Capalonga','Daet','Jose Panganiban','Labo','Mercedes',
     'Paracale','San Lorenzo Ruiz','San Vicente','Sta. Elena','Talisay','Vinzons'
   ];
+
+  // ————————————————————————————————————————
+  // Image helpers (documentation)
+  // ————————————————————————————————————————
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.9,
+    });
+    if (!result.canceled) setImage(result.assets[0].uri);
+  };
+
+  const takePhoto = async () => {
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.9,
+    });
+    if (!result.canceled) setImage(result.assets[0].uri);
+  };
 
   // ————————————————————————————————————————
   // Applicant search (Firestore)
@@ -351,6 +375,26 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
             )}
           </View>
 
+          {/* Documentation Section */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Documentation</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>Upload photos or take pictures for documentation</Text>
+            {image && (
+              <Image
+                source={{ uri: image }}
+                style={{ width: 250, height: 250, marginBottom: 16, borderRadius: 10, alignSelf: 'center' }}
+              />
+            )}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 20 }}>
+              <TouchableOpacity onPress={takePhoto} style={[styles.photoBtn, { backgroundColor: colors.accent }]}>
+                <Text style={styles.photoBtnText}>Take Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={pickImage} style={[styles.photoBtn, { backgroundColor: colors.accent }]}>
+                <Text style={styles.photoBtnText}>Upload Image</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {/* Submit Button */}
           <TouchableOpacity 
             style={[
@@ -568,4 +612,31 @@ const styles = StyleSheet.create({
   modalItem: { paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#E3F4EC' },
   modalButton: { marginTop: 16, padding: 12, borderRadius: 8, alignItems: 'center' },
   modalButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 16 },
+  // Documentation styles
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#25A18E',
+    marginBottom: 4,
+  },
+  sectionSubtitle: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 16,
+    fontWeight: '500',
+  },
+  photoBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    marginHorizontal: 8,
+    elevation: 2,
+  },
+  photoBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
 });
