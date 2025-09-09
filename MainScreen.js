@@ -110,7 +110,11 @@ export default function MainScreen({ navigation }) {
   const renderMainContent = () => {
     // First check for special transaction screens
     if (showTransactionScreen === 'Dispersal') {
-      return <Dispersal navigation={navigation} onBackToTransactions={() => setShowTransactionScreen('Transaction')} />;
+      return <Dispersal 
+        navigation={navigation} 
+        onBackToTransactions={() => setShowTransactionScreen('Transaction')} 
+        scannedUID={scannedUID}
+      />;
     } else if (showTransactionScreen === 'Cull') {
       return <Cull navigation={navigation} onBackToTransactions={(screen) => {
         if (screen === 'Status') {
