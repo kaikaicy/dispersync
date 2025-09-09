@@ -241,13 +241,13 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {/* Fixed Header */}
-      <View style={[styles.header, { backgroundColor: colors.white, borderBottomColor: colors.border }]}>
+      {/* <View style={[styles.header, { backgroundColor: colors.white, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={onBackToTransactions} style={styles.backButton} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.primary} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.primary }]}>Dispersal of Livestock</Text>
         <View style={{ width: 24 }} />
-      </View>
+      </View> */}
 
       {/* Scrollable Content */}
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
