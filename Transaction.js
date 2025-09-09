@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView } fr
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
-export default function Transaction({ navigation, onSelectTransaction }) {
+export default function Transaction({ navigation, onSelectTransaction, scannedUID }) {
   const cardStyle = {
     backgroundColor: '#F8FFFE',
     borderRadius: 32,
@@ -56,6 +56,12 @@ export default function Transaction({ navigation, onSelectTransaction }) {
             </View>
             
             <Text style={styles.title}>Select a Transaction</Text>
+            {scannedUID && (
+              <View style={styles.uidContainer}>
+                <Ionicons name="checkmark-circle" size={20} color="#25A18E" style={styles.uidIcon} />
+                <Text style={styles.uidText}>Card UID: {scannedUID}</Text>
+              </View>
+            )}
             <Text style={styles.subtitle}>
               Choose the type of transaction you want to perform
             </Text>
@@ -181,5 +187,25 @@ const styles = StyleSheet.create({
     color: '#25A18E',
     fontSize: 16,
     fontWeight: '600',
+  },
+  uidContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F4EC',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+  },
+  uidIcon: {
+    marginRight: 8,
+  },
+  uidText: {
+    color: '#25A18E',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: 'monospace',
   },
 }); 

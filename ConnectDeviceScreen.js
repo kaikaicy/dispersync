@@ -5,6 +5,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Rect, Circle, Line } from 'react-native-svg';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
+import deviceListener from './src/services/ListenToDeviceGetData';
+
 
 // Custom SVG icon for the device
 function DeviceIconSVG({ size = 100 }) {
@@ -28,12 +30,66 @@ function DeviceIconSVG({ size = 100 }) {
   );
 }
 
-export default function ConnectDeviceScreen({ onBack, onConnect, navigation }) {
+export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onUIDScanned }) {
+
+  
   const [scanning, setScanning] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
 
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const checkAnim = useRef(new Animated.Value(0)).current;
+
+
+  const [lastUID, setLastUID] = useState(null);           
+  const [errorMsg, setErrorMsg] = useState(null);      
+
+  // Set up UID listener
+  useEffect(() => {
+    const unsubscribe = deviceListener.onUID((uid, meta) => {
+      console.log('UID detected:', uid, meta);
+      setLastUID(uid);
+      setScanSuccess(true); 
+      setScanning(false);
+      setErrorMsg(null);
+    });
+
+    return () => {
+      unsubscribe();
+      // Stop the device listener when component unmounts
+      deviceListener.stop();
+    };
+  }, []);
+
+  const handleScan = async () => {
+    setErrorMsg(null);
+    setLastUID(null);
+    setScanSuccess(false);
+    setScanning(true);
+    
+    try {
+      // Stop any existing listener first
+      deviceListener.stop();
+      
+      // Start the listener
+      await deviceListener.start();
+      
+      // Set a timeout to stop scanning if no UID is detected
+      const timeoutId = setTimeout(() => {
+        if (scanning && !scanSuccess) {
+          setScanning(false);
+          setErrorMsg('No device detected. Please ensure the device is connected and try again.');
+          deviceListener.stop();
+        }
+      }, 10000); // 10 second timeout
+
+      // Clean up timeout when component unmounts or scanning stops
+      return () => clearTimeout(timeoutId);
+    } catch (e) {
+      console.error('Error starting device listener:', e);
+      setScanning(false);
+      setErrorMsg('Unable to start listener. Check Wi-Fi connection to the device.');
+    }
+  };
 
   useEffect(() => {
     if (scanning) {
@@ -212,18 +268,29 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation }) {
           >
             Scan Successful!
           </Text>
+          {lastUID && (
+            <Text
+              style={{
+                color: '#666',
+                fontSize: 14,
+                marginBottom: 8,
+                textAlign: 'center',
+                fontFamily: 'monospace',
+              }}
+            >
+              UID: {lastUID}
+            </Text>
+          )}
           <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16 }}>
-            <TouchableOpacity onPress={() => {
-              setScanning(true);
-              setScanSuccess(false);
-              setTimeout(() => {
-                setScanning(false);
-                setScanSuccess(true);
-              }, 2000);
-            }} style={{ backgroundColor: '#fff', borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24, marginRight: 12, borderWidth: 1, borderColor: accentColor }}>
+            <TouchableOpacity onPress={handleScan} style={{ backgroundColor: '#fff', borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24, marginRight: 12, borderWidth: 1, borderColor: accentColor }}>
               <Text style={{ color: accentColor, fontWeight: '600', fontSize: 16 }}>Scan Again</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onConnect} style={{ backgroundColor: accentColor, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24 }}>
+            <TouchableOpacity onPress={() => {
+              if (onUIDScanned && lastUID) {
+                onUIDScanned(lastUID);
+              }
+              onConnect();
+            }} style={{ backgroundColor: accentColor, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24 }}>
               <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Continue</Text>
             </TouchableOpacity>
           </View>
@@ -242,16 +309,14 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation }) {
         <Text style={{ fontSize: 15, color: '#666', marginBottom: 32, textAlign: 'center', paddingHorizontal: 10 }}>
           Please connect to a nearby device to continue.
         </Text>
-        <TouchableOpacity onPress={() => {
-          setScanning(true);
-          setScanSuccess(false);
-          setTimeout(() => {
-            setScanning(false);
-            setScanSuccess(true);
-          }, 2000);
-        }} style={{ backgroundColor: accentColor, borderRadius: 24, paddingVertical: 16, paddingHorizontal: 48, alignItems: 'center', shadowColor: accentColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8, marginBottom: 16 }}>
+        <TouchableOpacity onPress={handleScan} style={{ backgroundColor: accentColor, borderRadius: 24, paddingVertical: 16, paddingHorizontal: 48, alignItems: 'center', shadowColor: accentColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8, marginBottom: 16 }}>
           <Text style={{ color: '#fff', fontWeight: '600', fontSize: 18, letterSpacing: 1 }}>SCAN</Text>
         </TouchableOpacity>
+        {errorMsg && (
+          <Text style={{ color: '#e53e3e', fontSize: 14, textAlign: 'center', marginTop: 8, paddingHorizontal: 20 }}>
+            {errorMsg}
+          </Text>
+        )}
         <TouchableOpacity onPress={onBack} style={{ marginTop: 8 }}>
           <Text style={{ color: accentColor, fontWeight: '600', fontSize: 16 }}>Back</Text>
         </TouchableOpacity>

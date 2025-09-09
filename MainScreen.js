@@ -104,6 +104,7 @@ export default function MainScreen({ navigation }) {
   const [showBeneficiaries, setShowBeneficiaries] = useState(false);
   const [showInspect, setShowInspect] = useState(false);
   const [showTransactionScreen, setShowTransactionScreen] = useState(null);
+  const [scannedUID, setScannedUID] = useState(null);
 
   // Helper to render main content
   const renderMainContent = () => {
@@ -167,9 +168,18 @@ export default function MainScreen({ navigation }) {
     if (activeTab === 'Profile') {
       return <ProfileScreen navigation={navigation} />;
     } else if (activeTab === 'Scan') {
-      return <ConnectDeviceScreen onBack={() => setActiveTab('Dashboard')} onConnect={() => setActiveTab('Transaction')} navigation={navigation} />;
+      return <ConnectDeviceScreen 
+        onBack={() => setActiveTab('Dashboard')} 
+        onConnect={() => setActiveTab('Transaction')} 
+        onUIDScanned={(uid) => setScannedUID(uid)}
+        navigation={navigation} 
+      />;
     } else if (activeTab === 'Transaction') {
-      return <Transaction navigation={navigation} onSelectTransaction={setShowTransactionScreen} />;
+      return <Transaction 
+        navigation={navigation} 
+        onSelectTransaction={setShowTransactionScreen} 
+        scannedUID={scannedUID}
+      />;
     } else {
       // Dashboard content (default)
       return (
@@ -300,6 +310,7 @@ export default function MainScreen({ navigation }) {
                 setShowBeneficiaries(false);
                 setShowInspect(false);
                 setShowTransactionScreen(null);
+                setScannedUID(null);
               }}
             >
               <FontAwesome name="dashboard" size={22} color="#fff" />
@@ -313,6 +324,7 @@ export default function MainScreen({ navigation }) {
                   setShowBeneficiaries(false);
                   setShowInspect(false);
                   setShowTransactionScreen(null);
+                  setScannedUID(null);
                 }}
               >
                 <Ionicons name="scan" size={28} color="#4ca1af" />
@@ -326,6 +338,7 @@ export default function MainScreen({ navigation }) {
                 setShowBeneficiaries(false);
                 setShowInspect(false);
                 setShowTransactionScreen(null);
+                setScannedUID(null);
               }}
             >
               <Ionicons name="person-outline" size={22} color="#fff" />
