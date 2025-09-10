@@ -166,7 +166,7 @@ export default function Transaction({ navigation, onSelectTransaction, scannedUI
             )}
             {beneficiaryData && (
               <View style={styles.beneficiaryInfo}>
-                <Text style={styles.beneficiaryName}>{beneficiaryData.name || 'Unknown Beneficiary'}</Text>
+                <Text style={styles.beneficiaryName}>{beneficiaryData.fullName || 'Unknown Beneficiary'}</Text>
               
               </View>
             )}
