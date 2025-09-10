@@ -1,9 +1,15 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { getBeneficiaryDataByUID } from './src/services/GetBeneficiaryDataBasedOnUIDService';
 
-export default function Transaction({ navigation, onSelectTransaction }) {
+export default function Transaction({ navigation, onSelectTransaction, scannedUID }) {
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState(null);
+  const [beneficiaryData, setBeneficiaryData] = useState(null);
+  const [isNewCard, setIsNewCard] = useState(false);
+
   const cardStyle = {
     backgroundColor: '#F8FFFE',
     borderRadius: 32,
@@ -21,6 +27,57 @@ export default function Transaction({ navigation, onSelectTransaction }) {
   const accentColor = '#25A18E';
   const gradientColors = ['#4fd1c5', '#38b2ac', '#4299e1'];
 
+  // Validate UID when scannedUID changes
+  useEffect(() => {
+    if (scannedUID) {
+      validateUID();
+    } else {
+      setValidationResult(null);
+      setBeneficiaryData(null);
+      setIsNewCard(false);
+    }
+  }, [scannedUID]);
+
+  // Auto-navigate to Dispersal for new cards
+  useEffect(() => {
+    if (isNewCard && !isValidating) {
+      // Delay to show the "New Card Detected" message before navigating
+      const timer = setTimeout(() => {
+        onSelectTransaction('Dispersal');
+      }, 2500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isNewCard, isValidating, onSelectTransaction]);
+
+  const validateUID = async () => {
+    setIsValidating(true);
+    setValidationResult(null);
+    setBeneficiaryData(null);
+    setIsNewCard(false);
+
+    try {
+      const result = await getBeneficiaryDataByUID(scannedUID);
+      setValidationResult(result);
+      
+      if (result.exists && result.data) {
+        setBeneficiaryData(result.data);
+        setIsNewCard(false);
+      } else {
+        setIsNewCard(true);
+      }
+    } catch (error) {
+      setValidationResult({
+        exists: false,
+        data: null,
+        error: 'Failed to validate UID'
+      });
+      setIsNewCard(true);
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
   const TransactionButton = ({ icon, title, onPress }) => (
     <TouchableOpacity 
       style={styles.transactionButton}
@@ -36,6 +93,30 @@ export default function Transaction({ navigation, onSelectTransaction }) {
       </LinearGradient>
     </TouchableOpacity>
   );
+
+  // Loading screen when validating UID or when new card is being processed
+  if (isValidating || (isNewCard && !isValidating)) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#e6f4f1' }}>
+        <View style={styles.container}>
+          <View style={cardStyle}>
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={accentColor} />
+              <Text style={styles.loadingText}>
+                {isValidating ? 'Validating Card UID...' : 'New Card Detected. Redirecting...'}
+              </Text>
+              <Text style={styles.loadingSubtext}>
+                {isValidating 
+                  ? 'Please wait while we check the beneficiary database' 
+                  : 'Preparing to add new beneficiary data'
+                }
+              </Text>
+            </View>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#e6f4f1' }}>
@@ -56,33 +137,67 @@ export default function Transaction({ navigation, onSelectTransaction }) {
             </View>
             
             <Text style={styles.title}>Select a Transaction</Text>
+            {scannedUID && (
+              <View style={[
+                styles.uidContainer,
+                styles.uidContainerValid 
+              ]}>
+                <Ionicons 
+                  name="checkmark-circle"
+                  size={20} 
+                  color="#25A18E" 
+                  style={styles.uidIcon} 
+                />
+                <Text style={[
+                  styles.uidText,
+                  styles.uidTextValid
+                ]}>
+                  Card UID: {scannedUID}
+                </Text>
+              </View>
+            )}
+            {validationResult && !validationResult.exists && (
+              <View style={styles.newCardContainer}>
+                <Ionicons name="information-circle" size={16} color="#f59e0b" style={styles.newCardIcon} />
+                <Text style={styles.newCardText}>
+                  New Card. No Data Installed. Redirecting to Dispersal...
+                </Text>
+              </View>
+            )}
+            {beneficiaryData && (
+              <View style={styles.beneficiaryInfo}>
+                <Text style={styles.beneficiaryName}>{beneficiaryData.name || 'Unknown Beneficiary'}</Text>
+              
+              </View>
+            )}
             <Text style={styles.subtitle}>
               Choose the type of transaction you want to perform
             </Text>
             
-            <TransactionButton 
-              icon="business"
-              title="Dispersal of Livestock"
-              onPress={() => onSelectTransaction('Dispersal')}
-            />
+            {/* Show different buttons based on card status */}
+            {isNewCard ? (
+              // For new cards, show only Dispersal button
+              <TransactionButton 
+                icon="business"
+                title="Dispersal of Livestock"
+                onPress={() => onSelectTransaction('Dispersal')}
+              />
+            ) : (
+              // For existing cards, show Cull and Status buttons
+              <>
+                <TransactionButton 
+                  icon="medkit"
+                  title="Record a Cull/Slaughter"
+                  onPress={() => onSelectTransaction('Cull')}
+                />
 
-            <TransactionButton 
-              icon="medkit"
-              title="Record a Cull/Slaughter"
-              onPress={() => onSelectTransaction('Cull')}
-            />
-
-            <TransactionButton 
-              icon="people"
-              title="Add Beneficiary"
-              onPress={() => onSelectTransaction('Beneficiary')}
-            />
-
-            <TransactionButton 
-              icon="pulse"
-              title="Add Status"
-              onPress={() => onSelectTransaction('Status')}
-            />
+                <TransactionButton 
+                  icon="pulse"
+                  title="Add Status"
+                  onPress={() => onSelectTransaction('Status')}
+                />
+              </>
+            )}
 
             <TouchableOpacity 
               onPress={() => onSelectTransaction('Dashboard')} 
@@ -181,5 +296,99 @@ const styles = StyleSheet.create({
     color: '#25A18E',
     fontSize: 16,
     fontWeight: '600',
+  },
+  uidContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F4EC',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+  },
+  uidIcon: {
+    marginRight: 8,
+  },
+  uidText: {
+    color: '#25A18E',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: 'monospace',
+  },
+  uidContainerValid: {
+    backgroundColor: '#E3F4EC',
+    borderColor: '#25A18E',
+  },
+  uidContainerNew: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#f59e0b',
+  },
+  uidTextValid: {
+    color: '#25A18E',
+  },
+  uidTextNew: {
+    color: '#f59e0b',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#25A18E',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  loadingSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  newCardContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  newCardIcon: {
+    marginRight: 8,
+  },
+  newCardText: {
+    color: '#f59e0b',
+    fontSize: 12,
+    fontWeight: '500',
+    flex: 1,
+  },
+  beneficiaryInfo: {
+    backgroundColor: '#E3F4EC',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+    width: '100%',
+  },
+  beneficiaryName: {
+    color: '#25A18E',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  beneficiaryDetails: {
+    color: '#666',
+    fontSize: 14,
   },
 }); 

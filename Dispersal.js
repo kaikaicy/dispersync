@@ -6,6 +6,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import DropdownListComponent from './src/components/DropdownListComponent';
 
 // 🔥 Firebase (your path)
 import { auth, db } from './src/config/firebase';
@@ -31,7 +32,7 @@ const calculateAge = (birthdayTs) => {
   }
 };
 
-export default function Dispersal({ navigation, onBackToTransactions }) {
+export default function Dispersal({ navigation, onBackToTransactions, scannedUID }) {
   // ————————————————————————————————————————
   // Form state
   // ————————————————————————————————————————
@@ -40,6 +41,7 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
   const [selectedApplicant, setSelectedApplicant] = useState(null); // {id, fullName, municipality, barangay, address?, gender?, birthday?, contact?, livestock?}
   const [applicantResults, setApplicantResults] = useState([]);
   const [showApplicantModal, setShowApplicantModal] = useState(false);
+  const [isSearchingApplicants, setIsSearchingApplicants] = useState(false);
 
   const [livestockType, setLivestockType] = useState(''); // prefilled if applicant has one, editable
   const [livestockColor, setLivestockColor] = useState('');
@@ -57,8 +59,8 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
 
   // Static location data
   const municipalities = [
-    'Basud','Capalonga','Daet','Jose Panganiban','Labo','Mercedes',
-    'Paracale','San Lorenzo Ruiz','San Vicente','Sta. Elena','Talisay','Vinzons'
+    'Basud', 'Capalonga', 'Daet', 'Jose Panganiban', 'Labo', 'Mercedes',
+    'Paracale', 'San Lorenzo Ruiz', 'San Vicente', 'Sta. Elena', 'Talisay', 'Vinzons'
   ];
 
   // ————————————————————————————————————————
@@ -86,13 +88,14 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
   // ————————————————————————————————————————
   // Applicant search (Firestore)
   // ————————————————————————————————————————
-  const searchApplicants = async () => {
-    const term = (currentBeneficiary || '').trim();
+  const searchApplicants = async (searchTerm) => {
+    const term = (searchTerm || '').trim();
     if (!term) {
-      Alert.alert('Search', 'Please enter a name to search.');
+      setApplicantResults([]);
       return;
     }
 
+    setIsSearchingApplicants(true);
     try {
       // Range match on fullName. If you also store fullNameLower, switch to that for case-insensitive querying.
       const q1 = query(
@@ -114,20 +117,29 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
           .filter((r) => (r.fullName || '').toLowerCase().includes(termLower));
       }
 
-      setApplicantResults(results);
-      setShowApplicantModal(true);
+      // Convert to dropdown format
+      const dropdownOptions = results.map(applicant => ({
+        value: applicant.id,
+        label: applicant.fullName || 'Unknown',
+        subtitle: `${applicant.municipality || '-'}${applicant.livestock ? ` • ${applicant.livestock}` : ''}`,
+        data: applicant
+      }));
+
+      setApplicantResults(dropdownOptions);
     } catch (e) {
       console.error('searchApplicants error:', e);
-      Alert.alert('Search failed', e?.message || 'Could not search applicants.');
+      setApplicantResults([]);
+    } finally {
+      setIsSearchingApplicants(false);
     }
   };
 
-  const selectApplicant = (app) => {
+  const selectApplicant = (option) => {
+    const app = option.data || option; // Handle both dropdown format and direct data
     setSelectedApplicant(app);
     setCurrentBeneficiary(app.fullName || '');
     setMunicipality(app.municipality || '');
     setLivestockType(app.livestock || ''); // keep editable if blank
-    setShowApplicantModal(false);
   };
 
   // ————————————————————————————————————————
@@ -241,18 +253,18 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {/* Fixed Header */}
-      <View style={[styles.header, { backgroundColor: colors.white, borderBottomColor: colors.border }]}>
+      {/* <View style={[styles.header, { backgroundColor: colors.white, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={onBackToTransactions} style={styles.backButton} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.primary} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.primary }]}>Dispersal of Livestock</Text>
         <View style={{ width: 24 }} />
-      </View>
+      </View> */}
 
       {/* Scrollable Content */}
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={[styles.container, { backgroundColor: colors.white }]}>
-          
+
           {/* Page Header */}
           <View style={styles.pageHeader}>
             <Text style={[styles.pageTitle, { color: colors.primary }]}>DISPERSAL OF LIVESTOCK</Text>
@@ -261,30 +273,36 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
             </Text>
           </View>
 
+          {/* Scanned UID Display */}
+          {scannedUID && (
+            <View style={[styles.uidDisplayContainer, { backgroundColor: colors.border, borderColor: colors.primary }]}>
+              <Ionicons name="card" size={20} color={colors.primary} style={styles.uidIcon} />
+              <Text style={[styles.uidText, { color: colors.primary }]}>
+                Card UID: {scannedUID}
+              </Text>
+            </View>
+          )}
+
           {/* Basic Information Section */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.primary }]}>Basic Information</Text>
             <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>
               Enter the basic details of the beneficiary and livestock
             </Text>
-            
-            {/* Search name */}
-            <Text style={[styles.inputLabel, { color: colors.primary }]}>Name of Beneficiary</Text>
-            <View style={{ flexDirection: 'row', gap: 8, width: '100%' }}>
-              <TextInput
-                style={[styles.input, { borderColor: colors.border, color: colors.text, flex: 1 }]}
-                placeholder="Type a name"
-                placeholderTextColor={colors.textLight}
-                value={currentBeneficiary}
-                onChangeText={setCurrentBeneficiary}
-              />
-              <TouchableOpacity
-                onPress={searchApplicants}
-                style={{ backgroundColor: colors.accent, borderRadius: 8, paddingHorizontal: 12, justifyContent: 'center' }}
-              >
-                <Text style={{ color: '#fff', fontWeight: '600' }}>Search</Text>
-              </TouchableOpacity>
-            </View>
+
+            {/* Beneficiary Dropdown */}
+            <DropdownListComponent
+              label="Name of Beneficiary"
+              placeholder="Search and select a beneficiary"
+              options={applicantResults}
+              selectedValue={selectedApplicant?.id}
+              onSelect={selectApplicant}
+              onSearch={searchApplicants}
+              loading={isSearchingApplicants}
+              searchable={true}
+              searchPlaceholder="Type a name to search..."
+              emptyMessage="No beneficiaries found. Try a different search term."
+            />
             {selectedApplicant && (
               <Text style={{ alignSelf: 'flex-start', marginTop: 6, color: colors.textLight }}>
                 Selected: {selectedApplicant.fullName} ({selectedApplicant.id})
@@ -396,9 +414,9 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
           </View>
 
           {/* Submit Button */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
-              styles.submitButton, 
+              styles.submitButton,
               { backgroundColor: colors.accent },
             ]}
             onPress={handleSubmit}
@@ -411,41 +429,6 @@ export default function Dispersal({ navigation, onBackToTransactions }) {
         </View>
       </ScrollView>
 
-      {/* Applicant Search Modal */}
-      <Modal visible={showApplicantModal} transparent animationType="slide">
-        <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, { backgroundColor: colors.white }]}>
-            <Text style={[styles.modalTitle, { color: colors.primary }]}>Select Applicant</Text>
-            <ScrollView style={styles.modalScrollView}>
-              {applicantResults.length === 0 ? (
-                <Text style={{ color: colors.textLight, textAlign: 'center', paddingVertical: 16 }}>
-                  No results.
-                </Text>
-              ) : (
-                applicantResults.map((a) => (
-                  <TouchableOpacity
-                    key={a.id}
-                    style={[styles.modalItem, { borderBottomColor: colors.border }]}
-                    onPress={() => selectApplicant(a)}
-                  >
-                    <Text style={{ color: colors.text, fontWeight: '600' }}>{a.fullName || '(No name)'}</Text>
-                    <Text style={{ color: colors.textLight, marginTop: 2, fontSize: 12 }}>
-                      {a.municipality || '-'}
-                      {a.livestock ? ` • Livestock: ${a.livestock}` : ''}
-                    </Text>
-                  </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: colors.accent }]}
-              onPress={() => setShowApplicantModal(false)}
-            >
-              <Text style={styles.modalButtonText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       {/* Municipality Picker */}
       <Modal visible={showMunicipalityPicker} transparent animationType="slide">
@@ -638,5 +621,27 @@ const styles = StyleSheet.create({
   photoBtnText: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  // UID Display styles
+  uidDisplayContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F4EC',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+  },
+  uidIcon: {
+    marginRight: 12,
+  },
+  uidText: {
+    color: '#25A18E',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: 'monospace',
+    flex: 1,
   },
 });
