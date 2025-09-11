@@ -13,6 +13,7 @@ import Beneficiary from './Beneficiary';
 import Redispersal from './Redispersal';
 import ListOfBeneficiaries from './ListOfBeneficiaries';
 import ListToInspect from './ListToInspect';
+import ListForDispersal from './ListForDispersal';
 import Transfer from './Transfer';
 
 // Import logo images
@@ -103,6 +104,7 @@ export default function MainScreen({ navigation }) {
   const [notifModalVisible, setNotifModalVisible] = useState(false);
   const [showBeneficiaries, setShowBeneficiaries] = useState(false);
   const [showInspect, setShowInspect] = useState(false);
+  const [showForDispersal, setShowForDispersal] = useState(false);
   const [showTransactionScreen, setShowTransactionScreen] = useState(null);
   const [scannedUID, setScannedUID] = useState(null);
 
@@ -166,6 +168,9 @@ export default function MainScreen({ navigation }) {
     }
     if (showInspect) {
       return <ListToInspect />;
+    }
+    if (showForDispersal) {
+      return <ListForDispersal />;
     }
     
     // Finally check the active tab
@@ -246,11 +251,14 @@ export default function MainScreen({ navigation }) {
     setNotifModalVisible(false);
     setShowBeneficiaries(false);
     setShowInspect(false);
+    setShowForDispersal(false);
     setShowTransactionScreen(null);
     if (choice === 'beneficiaries') {
       setShowBeneficiaries(true);
     } else if (choice === 'inspect') {
       setShowInspect(true);
+    } else if (choice === 'for_dispersal') {
+      setShowForDispersal(true);
     }
   };
 
@@ -391,6 +399,12 @@ export default function MainScreen({ navigation }) {
                 onPress={() => handleNotifChoice('inspect')}
               >
                 <Text style={{ color: '#25A18E', fontWeight: '500' }}>List to Inspect</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ padding: 14, borderTopWidth: 1, borderTopColor: '#eee' }}
+                onPress={() => handleNotifChoice('for_dispersal')}
+              >
+                <Text style={{ color: '#25A18E', fontWeight: '500' }}>List for Dispersal</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>

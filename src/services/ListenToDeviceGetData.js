@@ -13,7 +13,7 @@
  *   const uid = await listener.waitForNextUID({ timeoutMs }); // resolves on next UID
  */
 
-const DEFAULT_HOST = "http://176.16.35.200";
+const DEFAULT_HOST = "http://172.16.35.200";
 const DEFAULT_PATH = "/getData";
 const DEFAULT_INTERVAL_MS = 500;
 const DEFAULT_REQ_TIMEOUT_MS = 1000;
