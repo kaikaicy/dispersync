@@ -13,6 +13,7 @@
  *   const uid = await listener.waitForNextUID({ timeoutMs }); // resolves on next UID
  */
 
+//const DEFAULT_HOST = "http://10.101.119.200";
 const DEFAULT_HOST = "http://172.16.35.200";
 const DEFAULT_PATH = "/getData";
 const DEFAULT_INTERVAL_MS = 500;
@@ -34,6 +35,10 @@ export function createDeviceListener(opts = {}) {
 
   // waiters for "next UID" promises
   let pendingResolvers = [];
+
+  // Temporary dummy data for testing
+  const DUMMY_UID = "AA:BB:CC:DD:EE";
+  let dummyDataEnabled = true;
 
   function _emit(uid) {
     const now = Date.now();
@@ -61,6 +66,12 @@ export function createDeviceListener(opts = {}) {
   }
 
   async function pollOnce(abortSignal) {
+    // Return dummy data if enabled
+    if (dummyDataEnabled) {
+      _emit(DUMMY_UID);
+      return DUMMY_UID;
+    }
+
     const ctl = new AbortController();
     const timeout = setTimeout(() => ctl.abort(), requestTimeoutMs);
     try {
@@ -154,6 +165,10 @@ export function createDeviceListener(opts = {}) {
     waitForNextUID,
     get isListening() { return isListening; },
     get config() { return { host, path, intervalMs, requestTimeoutMs }; },
+    // Dummy data controls
+    enableDummyData: () => { dummyDataEnabled = true; },
+    disableDummyData: () => { dummyDataEnabled = false; },
+    get isDummyDataEnabled() { return dummyDataEnabled; },
   };
 }
 
