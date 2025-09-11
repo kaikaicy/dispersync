@@ -8,6 +8,7 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -133,35 +134,51 @@ export default function ListForDispersal() {
 
   const headerPlace = staffMunicipality && typeof staffMunicipality === 'string' ? staffMunicipality : 'your area';
 
-  return (
-    <View style={{ flex: 1, backgroundColor: '#F5F9F8' }}>
-      <View
-        style={{
-          backgroundColor: '#D9D9D9',
-          padding: 16,
-          borderTopLeftRadius: 8,
-          borderTopRightRadius: 8,
-        }}
-      >
-        <Text
-          style={{
-            fontWeight: 'bold',
-            fontSize: 17,
-            color: '#25A18E',
-            textAlign: 'center',
-            marginBottom: 10,
-          }}
-        >
-          {`For Dispersal in ${headerPlace}`}
-        </Text>
+  // Colors and styles adapted from ListToInspect list view for consistent UI
+  const colors = {
+    primary: '#25A18E',
+    background: '#FFFFE0',
+    cardBg: '#F5F9F8',
+    white: '#FFFFFF',
+    border: '#E3F4EC',
+    text: '#333',
+    textLight: '#666',
+  };
 
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={{
+        backgroundColor: '#F5F9F8',
+        padding: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderTopLeftRadius: 8,
+        borderTopRightRadius: 8
+      }}>
+        <View>
+          <Text style={{ fontWeight: 'bold', color: colors.primary, fontSize: 15 }}>OLDMS</Text>
+          <Text style={{ color: '#888', fontSize: 13 }}>
+            {`For Dispersal in ${headerPlace}`}
+          </Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={{ color: colors.primary, fontSize: 12, marginBottom: 4 }}>
+            {filtered.length} Ready
+          </Text>
+        </View>
+      </View>
+
+      <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
         <View style={{
-          backgroundColor: '#fff',
+          backgroundColor: colors.white,
           borderRadius: 8,
           flexDirection: 'row',
           alignItems: 'center',
           paddingHorizontal: 8,
           marginBottom: 10,
+          borderWidth: 1,
+          borderColor: colors.border,
         }}>
           <Ionicons name="search" size={18} color="#888" />
           <TextInput
@@ -171,61 +188,57 @@ export default function ListForDispersal() {
             onChangeText={setSearch}
           />
         </View>
-
-        <View style={{
-          flexDirection: 'row',
-          paddingVertical: 6,
-          borderBottomWidth: 1,
-          borderBottomColor: '#ccc',
-        }}>
-          <Text style={{ flex: 2, fontWeight: 'bold', color: '#25A18E' }}>Applicant</Text>
-          <Text style={{ flex: 2, fontWeight: 'bold', color: '#25A18E' }}>Barangay</Text>
-          <Text style={{ flex: 1, fontWeight: 'bold', color: '#25A18E', textAlign: 'center' }}>Action</Text>
-        </View>
       </View>
 
       {(!authReady || loading) ? (
-        <View style={{ padding: 16 }}>
-          <ActivityIndicator size="small" color="#25A18E" />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ marginTop: 16, color: colors.textLight }}>Loading applicants...</Text>
         </View>
       ) : (
-        <ScrollView style={{ backgroundColor: '#F5F9F8' }}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ paddingHorizontal: 16 }}>
           {filtered.length === 0 ? (
-            <View style={{ alignItems: 'center', paddingVertical: 24 }}>
-              <Text style={{ color: '#777' }}>No applicants ready for dispersal.</Text>
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 24 }}>
+              <Text style={{ fontSize: 64, color: '#4CAF50' }}>✓</Text>
+              <Text style={{ marginTop: 16, fontSize: 18, color: '#666', textAlign: 'center' }}>
+                No applicants ready for dispersal in {headerPlace}
+              </Text>
+              <Text style={{ marginTop: 8, fontSize: 14, color: '#999', textAlign: 'center' }}>
+                All approved inspections are processed
+              </Text>
             </View>
           ) : (
             filtered.map((b, i) => (
-              <View
+              <TouchableOpacity
                 key={`${b.id}-${i}`}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  backgroundColor: '#fff',
-                  marginHorizontal: 8,
-                  marginVertical: 4,
-                  borderRadius: 8,
-                  padding: 10,
+                style={styles.applicantCard}
+                onPress={() => {
+                  setSelectedApplicant(b);
+                  setIsModalVisible(true);
                 }}
+                activeOpacity={0.7}
               >
-                <Text style={{ flex: 2, color: '#333' }}>{b.name}</Text>
-                <Text style={{ flex: 2, color: '#333' }}>{b.barangay}</Text>
-                <TouchableOpacity
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#25A18E',
-                    borderRadius: 16,
-                    paddingVertical: 4,
-                    alignItems: 'center',
-                  }}
-                  onPress={() => {
-                    setSelectedApplicant(b);
-                    setIsModalVisible(true);
-                  }}
-                >
-                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>View</Text>
-                </TouchableOpacity>
-              </View>
+                <View style={styles.applicantHeader}>
+                  <View style={styles.applicantAvatar}>
+                    <Text style={styles.applicantInitial}>
+                      {(b.name || 'A').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.applicantInfo}>
+                    <Text style={styles.applicantName}>{b.name}</Text>
+                    <Text style={styles.applicantDetails}>
+                      {b.barangay || 'Barangay N/A'} • {b.municipality || 'Municipality N/A'}
+                    </Text>
+                    <Text style={styles.applicantAddress}>{b.address || 'Address not specified'}</Text>
+                  </View>
+                  <View style={styles.applicantStatus}>
+                    <View style={styles.statusBadge}>
+                      <Text style={styles.statusText}>Ready</Text>
+                    </View>
+                    <Text style={{ fontSize: 20, color: colors.primary }}>→</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
             ))
           )}
         </ScrollView>
@@ -302,5 +315,71 @@ function DetailRow({ label, value }) {
   );
 }
 
-
-
+const styles = StyleSheet.create({
+  applicantCard: {
+    backgroundColor: '#F5F9F8',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  applicantHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  applicantAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#25A18E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  applicantInitial: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  applicantInfo: {
+    flex: 1,
+  },
+  applicantName: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#333',
+  },
+  applicantDetails: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  applicantAddress: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  applicantStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: 100,
+  },
+  statusBadge: {
+    backgroundColor: '#C8E6C9',
+    borderRadius: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  statusText: {
+    color: '#25A18E',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+});
