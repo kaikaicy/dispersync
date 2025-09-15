@@ -14,7 +14,8 @@
  */
 
 //const DEFAULT_HOST = "http://10.101.119.200";
-const DEFAULT_HOST = "http://172.16.35.200";
+//const DEFAULT_HOST = "http://172.16.35.200";
+const DEFAULT_HOST = "http://10.166.200.200";
 const DEFAULT_PATH = "/getData";
 const DEFAULT_INTERVAL_MS = 500;
 const DEFAULT_REQ_TIMEOUT_MS = 1000;
@@ -37,8 +38,8 @@ export function createDeviceListener(opts = {}) {
   let pendingResolvers = [];
 
   // Temporary dummy data for testing
-  const DUMMY_UID = "AA:BB:CC:DD:EE";
-  let dummyDataEnabled = true;
+  //const DUMMY_UID = "AA:BB:CC:DD:EE";
+  let dummyDataEnabled = false;
 
   function _emit(uid) {
     const now = Date.now();

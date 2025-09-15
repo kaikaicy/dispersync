@@ -64,59 +64,76 @@ export default function ListForDispersal() {
     return () => unsub();
   }, []);
 
-  // Listen to inspections approved → these applicants are ready for dispersal
   useEffect(() => {
-    const qInsp = query(collection(db, 'inspections'), where('status', '==', 'approved'));
+    const qSched = query(collection(db, 'dispersalSchedules'));
     const unsub = onSnapshot(
-      qInsp,
+      qSched,
       async (snap) => {
         try {
-          const inspections = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          const applicantIds = Array.from(new Set(inspections.map((r) => r.applicantId).filter(Boolean)));
-
+          const schedules = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          const applicantIds = Array.from(
+            new Set(schedules.map((r) => r.applicantId).filter(Boolean))
+          );
+  
           if (applicantIds.length === 0) {
             setRows([]);
             setLoading(false);
             return;
           }
-
-          // fetch applicants in batches
+  
+          // fetch applicants in batches (with contact field)
           const applicants = [];
           for (const ids of chunk(applicantIds, 10)) {
             const aSnap = await getDocs(
               query(collection(db, 'applicants'), where(documentId(), 'in', ids))
             );
-            aSnap.forEach((doc) => applicants.push({ id: doc.id, ...doc.data() }));
+            aSnap.forEach((doc) =>
+              applicants.push({ id: doc.id, ...doc.data() })
+            );
           }
-
+  
           // build rows
-          const combined = applicants.map((app) => ({
-            id: app.id,
-            name: app.fullName || '(No name)',
-            barangay: app.barangay || '-',
-            municipality: app.municipality || '-',
-            address: app.address || '-',
-            livestock: app.livestock || '-',
-            applicant: app,
-          }));
-
+          const combined = schedules.map((sched) => {
+            const app = applicants.find((a) => a.id === sched.applicantId) || {};
+            return {
+              id: sched.id,
+              applicantId: sched.applicantId,
+              name: app.fullName || '(No name)',
+              barangay: app.barangay || '-',
+              municipality: app.municipality || '-',
+              address: app.address || '-',
+              livestock: app.livestock || '-',
+              contact: app.contact || 'No contact',
+              scheduledFor: sched.scheduledFor,
+              livestockSource: sched.livestockSource,
+              applicant: app,
+            };
+          });
+  
           setRows(combined);
           setLoading(false);
         } catch (err) {
           console.error('Load list for dispersal failed:', err);
           setLoading(false);
-          Alert.alert('Error', err?.message || 'Failed to load list for dispersal.');
+          Alert.alert(
+            'Error',
+            err?.message || 'Failed to load list for dispersal.'
+          );
         }
       },
       (err) => {
         console.error('onSnapshot error (dispersal list):', err);
         setLoading(false);
-        Alert.alert('Error', err?.message || 'Failed to listen for dispersal list.');
+        Alert.alert(
+          'Error',
+          err?.message || 'Failed to listen for dispersal list.'
+        );
       }
     );
-
+  
     return () => unsub();
   }, []);
+  
 
   const municipalityFiltered = useMemo(() => {
     if (!staffMunicipality) return rows;
@@ -283,6 +300,7 @@ export default function ListForDispersal() {
                 <DetailRow label="Address" value={selectedApplicant.address || '—'} />
                 <DetailRow label="Barangay" value={selectedApplicant.barangay || '—'} />
                 <DetailRow label="Municipality" value={selectedApplicant.municipality || '—'} />
+                <DetailRow label="Contact Number" value={selectedApplicant?.contact || '—'} />
                 <DetailRow label="Livestock" value={selectedApplicant.livestock || '—'} />
               </View>
             )}
