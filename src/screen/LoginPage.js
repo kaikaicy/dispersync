@@ -21,13 +21,16 @@ import {
 
 // ... your other imports like styles, logo, etc.
 
-export default function LoginPage({ navigation }) {
+export default function LoginPage({ navigation, route }) {
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [userIdError, setUserIdError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  
+  // Get device IP from route params (passed from GetDeviceConnectionScreen)
+  const deviceBaseUrl = route?.params?.deviceBaseUrl;
 
   // 🔎 Find email by the numeric User ID stored in Firestore
   // Assumes each staff doc has a field: userId (string or numeric-like string, e.g. "12345")
@@ -95,8 +98,17 @@ export default function LoginPage({ navigation }) {
         // navigation.replace('Main', { staff: staffData });
       }
 
-      // 4) Go to Main after successful login
-      navigation.replace("Main");
+      // 4) Navigate to Main with device IP after successful login
+      if (deviceBaseUrl) {
+        console.log('Login successful, navigating to Main with device IP:', deviceBaseUrl);
+        navigation.replace("Main", {
+          deviceBaseUrl: deviceBaseUrl
+        });
+      } else {
+        // Fallback to Main if no device IP
+        console.log('Login successful, no device IP found, navigating to Main');
+        navigation.replace("Main");
+      }
     } catch (err) {
       console.error("Login failed:", err?.message || err);
       // Show a friendly error

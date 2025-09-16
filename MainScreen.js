@@ -99,7 +99,7 @@ export function ScanningCircle({ duration = 2000, size = 140, strokeWidth = 10, 
   );
 }
 
-export default function MainScreen({ navigation }) {
+export default function MainScreen({ navigation, route }) {
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [notifModalVisible, setNotifModalVisible] = useState(false);
   const [showBeneficiaries, setShowBeneficiaries] = useState(false);
@@ -107,6 +107,16 @@ export default function MainScreen({ navigation }) {
   const [showForDispersal, setShowForDispersal] = useState(false);
   const [showTransactionScreen, setShowTransactionScreen] = useState(null);
   const [scannedUID, setScannedUID] = useState(null);
+  
+  // Get device IP from route params (passed from Login)
+  const deviceBaseUrl = route?.params?.deviceBaseUrl;
+  
+  // Debug logging
+  useEffect(() => {
+    if (deviceBaseUrl) {
+      console.log('MainScreen received device IP:', deviceBaseUrl);
+    }
+  }, [deviceBaseUrl]);
 
   // Helper to render main content
   const renderMainContent = () => {
@@ -177,11 +187,13 @@ export default function MainScreen({ navigation }) {
     if (activeTab === 'Profile') {
       return <ProfileScreen navigation={navigation} />;
     } else if (activeTab === 'Scan') {
+      console.log('MainScreen navigating to ConnectDeviceScreen with device IP:', deviceBaseUrl);
       return <ConnectDeviceScreen 
         onBack={() => setActiveTab('Dashboard')} 
         onConnect={() => setActiveTab('Transaction')} 
         onUIDScanned={(uid) => setScannedUID(uid)}
-        navigation={navigation} 
+        navigation={navigation}
+        route={{ params: { deviceBaseUrl: deviceBaseUrl } }}
       />;
     } else if (activeTab === 'Transaction') {
       return <Transaction 

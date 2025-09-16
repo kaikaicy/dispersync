@@ -21,7 +21,7 @@ export default function SplashScreen({ navigation }) {
           useNativeDriver: true,
         })
       ]).start(() => {
-        navigation.replace('Login');
+        navigation.replace('GetDeviceConnection');
       });
     }, 5000); // 5 seconds steady
     return () => clearTimeout(steadyTimer);

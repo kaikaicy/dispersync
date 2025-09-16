@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Rect, Circle, Line } from 'react-native-svg';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
-import deviceListener from './src/services/ListenToDeviceGetData';
+import { createDeviceListener } from './src/services/ListenToDeviceGetData';
 
 
 // Custom SVG icon for the device
@@ -30,22 +30,38 @@ function DeviceIconSVG({ size = 100 }) {
   );
 }
 
-export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onUIDScanned }) {
+export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onUIDScanned, route }) {
 
   
   const [scanning, setScanning] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
+  const [lastUID, setLastUID] = useState(null);
+  const [errorMsg, setErrorMsg] = useState(null);
+  
+  // Get device base URL from route params (passed from Login)
+  const deviceBaseUrl = route?.params?.deviceBaseUrl;
 
-  const rotateAnim = useRef(new Animated.Value(0)).current;
-  const checkAnim = useRef(new Animated.Value(0)).current;
+  // Create device listener with discovered IP
+  const deviceListener = useRef(null);
 
-
-  const [lastUID, setLastUID] = useState(null);           
-  const [errorMsg, setErrorMsg] = useState(null);      
+  // Create device listener with discovered IP
+  useEffect(() => {
+    if (deviceBaseUrl) {
+      console.log('Creating device listener with IP:', deviceBaseUrl);
+      deviceListener.current = createDeviceListener({ 
+        host: deviceBaseUrl,
+        path: '/getData'
+      });
+    } else {
+      setErrorMsg('No device IP provided');
+    }
+  }, [deviceBaseUrl]);
 
   // Set up UID listener
   useEffect(() => {
-    const unsubscribe = deviceListener.onUID((uid, meta) => {
+    if (!deviceListener.current) return;
+
+    const unsubscribe = deviceListener.current.onUID((uid, meta) => {
       console.log('UID detected:', uid, meta);
       setLastUID(uid);
       setScanSuccess(true); 
@@ -56,9 +72,11 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onU
     return () => {
       unsubscribe();
       // Stop the device listener when component unmounts
-      deviceListener.stop();
+      if (deviceListener.current) {
+        deviceListener.current.stop();
+      }
     };
-  }, []);
+  }, [deviceListener.current]);
 
   const handleScan = async () => {
     setErrorMsg(null);
@@ -67,18 +85,24 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onU
     setScanning(true);
     
     try {
+      if (!deviceListener.current) {
+        setErrorMsg('Device not configured. Please go back and scan for device first.');
+        setScanning(false);
+        return;
+      }
+
       // Stop any existing listener first
-      deviceListener.stop();
+      deviceListener.current.stop();
       
       // Start the listener
-      await deviceListener.start();
+      await deviceListener.current.start();
       
       // Set a timeout to stop scanning if no UID is detected
       const timeoutId = setTimeout(() => {
         if (scanning && !scanSuccess) {
           setScanning(false);
           setErrorMsg('No device detected. Please ensure the device is connected and try again.');
-          deviceListener.stop();
+          deviceListener.current.stop();
         }
       }, 10000); // 10 second timeout
 
@@ -90,6 +114,15 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onU
       setErrorMsg('Unable to start listener. Check Wi-Fi connection to the device.');
     }
   };
+
+  const handleContinue = () => {
+    console.log('Continue to Main screen');
+    navigation.replace("Main");
+  };
+
+  // Animation for scanning and success
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const checkAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (scanning) {
@@ -285,12 +318,7 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onU
             <TouchableOpacity onPress={handleScan} style={{ backgroundColor: '#fff', borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24, marginRight: 12, borderWidth: 1, borderColor: accentColor }}>
               <Text style={{ color: accentColor, fontWeight: '600', fontSize: 16 }}>Scan Again</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => {
-              if (onUIDScanned && lastUID) {
-                onUIDScanned(lastUID);
-              }
-              onConnect();
-            }} style={{ backgroundColor: accentColor, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24 }}>
+            <TouchableOpacity onPress={handleContinue} style={{ backgroundColor: accentColor, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24 }}>
               <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Continue</Text>
             </TouchableOpacity>
           </View>
@@ -307,19 +335,50 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onU
         </View>
         <Text style={{ fontSize: 24, fontWeight: '700', color: accentColor, marginBottom: 8, textAlign: 'center' }}>Connect to Device</Text>
         <Text style={{ fontSize: 15, color: '#666', marginBottom: 32, textAlign: 'center', paddingHorizontal: 10 }}>
-          Please connect to a nearby device to continue.
+          {deviceBaseUrl ? `Device IP: ${deviceBaseUrl}` : 'No device IP provided. Please go back and scan for a device first.'}
         </Text>
-        <TouchableOpacity onPress={handleScan} style={{ backgroundColor: accentColor, borderRadius: 24, paddingVertical: 16, paddingHorizontal: 48, alignItems: 'center', shadowColor: accentColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8, marginBottom: 16 }}>
-          <Text style={{ color: '#fff', fontWeight: '600', fontSize: 18, letterSpacing: 1 }}>SCAN</Text>
-        </TouchableOpacity>
+        {deviceBaseUrl ? (
+          <TouchableOpacity onPress={handleScan} style={{ 
+            backgroundColor: accentColor, 
+            borderRadius: 24, 
+            paddingVertical: 16, 
+            paddingHorizontal: 48, 
+            alignItems: 'center', 
+            shadowColor: accentColor, 
+            shadowOffset: { width: 0, height: 4 }, 
+            shadowOpacity: 0.2, 
+            shadowRadius: 12, 
+            elevation: 8, 
+            marginBottom: 16 
+          }}>
+            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 18, letterSpacing: 1 }}>SCAN UID</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity onPress={() => {
+            if (navigation) {
+              navigation.goBack();
+            }
+          }} style={{ 
+            backgroundColor: accentColor, 
+            borderRadius: 24, 
+            paddingVertical: 16, 
+            paddingHorizontal: 48, 
+            alignItems: 'center', 
+            shadowColor: accentColor, 
+            shadowOffset: { width: 0, height: 4 }, 
+            shadowOpacity: 0.2, 
+            shadowRadius: 12, 
+            elevation: 8, 
+            marginBottom: 16 
+          }}>
+            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 18, letterSpacing: 1 }}>Go Back</Text>
+          </TouchableOpacity>
+        )}
         {errorMsg && (
           <Text style={{ color: '#e53e3e', fontSize: 14, textAlign: 'center', marginTop: 8, paddingHorizontal: 20 }}>
             {errorMsg}
           </Text>
         )}
-        <TouchableOpacity onPress={onBack} style={{ marginTop: 8 }}>
-          <Text style={{ color: accentColor, fontWeight: '600', fontSize: 16 }}>Back</Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
