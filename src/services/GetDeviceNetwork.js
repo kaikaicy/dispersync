@@ -71,10 +71,72 @@ export async function findDispersyncFromPhoneIpPure(
 }
 
 /**
+ * Version of findDispersyncFromPhoneIpPure that supports onIpProbe callback
+ */
+async function findDispersyncFromPhoneIpPureWithCallback(
+  {
+    timeoutPerHostMs = 700,
+    maxConcurrent = 16,
+  } = {},
+  onIpProbe
+) {
+  const phoneIp = await Network.getIpAddressAsync(); // e.g. "10.0.0.12", "172.16.1.8", "192.168.1.23"
+  if (!phoneIp) return null;
+
+  const parts = parseIp(phoneIp);
+  if (!parts) return null;
+
+  const [a, b, c, dSelf] = parts;
+  const selfIp = ipStr(a, b, c, dSelf);
+
+  // Build flat candidate list (a.b.c.2..254), excluding self
+  const candidates = [];
+  for (let d = 2; d <= 254; d++) {
+    const ip = ipStr(a, b, c, d);
+    if (ip !== selfIp) candidates.push(ip);
+  }
+
+  let idx = 0;
+  let found = null;
+
+  async function worker() {
+    while (!found && idx < candidates.length) {
+      const ip = candidates[idx++];
+      
+      // Call the onIpProbe callback before probing
+      if (onIpProbe) {
+        onIpProbe(ip);
+      }
+      
+      const txt = await httpGet(`http://${ip}:${PORT}${PING_PATH}`, timeoutPerHostMs);
+      if (txt && txt.toUpperCase() === "OK") {
+        found = { ip, port: PORT, baseUrl: `http://${ip}:${PORT}` };
+        return;
+      }
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(maxConcurrent, candidates.length)) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return found;
+}
+
+/**
  * Alias for findDispersyncFromPhoneIpPure to match the import in GetDeviceConnectionScreen
+ * Includes support for onIpProbe callback
  */
 export async function findDispersyncOnSubnet(options = {}) {
-  return findDispersyncFromPhoneIpPure(options);
+  const { onIpProbe, ...otherOptions } = options;
+  
+  // If onIpProbe callback is provided, we need to modify the worker function
+  if (onIpProbe) {
+    return findDispersyncFromPhoneIpPureWithCallback(otherOptions, onIpProbe);
+  }
+  
+  return findDispersyncFromPhoneIpPure(otherOptions);
 }
 
 /** Optional: verify identity if you exposed /whoami on ESP32 */
