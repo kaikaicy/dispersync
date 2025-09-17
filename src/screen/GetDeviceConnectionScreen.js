@@ -6,7 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   findDispersyncOnSubnet,
   whoAmI,
-} from "../services/GetDeviceNetwork.js";
+} from "../services/GetDeviceNetwork";
 import DeviceScanningComponent from "../components/DeviceScanningComponent";
 
 export default function GetDeviceConnectionScreen({ navigation }) {
