@@ -26,7 +26,7 @@ function DeviceIconSVG({ size = 100 }) {
   );
 }
 
-export default function ConnectDeviceScreen({ navigation }) {
+export default function ConnectDeviceScreen({ onContinue, navigation, onScannedUID, onUIDScanned, onConnect }) {
   const { baseUrl: deviceBaseUrl } = useDevice();
 
   const [scanning, setScanning] = useState(false);
@@ -79,9 +79,17 @@ export default function ConnectDeviceScreen({ navigation }) {
       if (deviceListener.current) {
         try { deviceListener.current.stop(); } catch {}
       }
+      // Call the onUIDScanned callback if provided
+      if (onUIDScanned) {
+        onUIDScanned(uid);
+      }
+      // Also call onScannedUID for backward compatibility
+      if (onScannedUID) {
+        onScannedUID(uid);
+      }
     });
     return () => unsubscribe();
-  }, [deviceBaseUrl]);
+  }, [deviceBaseUrl, onUIDScanned]);
 
   // Start polling
   const handleScan = async () => {
@@ -115,7 +123,12 @@ export default function ConnectDeviceScreen({ navigation }) {
   };
 
   const handleContinue = () => {
-    navigation.replace("Main");
+    // Call onConnect if provided, otherwise fall back to onContinue
+    if (onConnect) {
+      onConnect();
+    } else if (onContinue) {
+      onContinue();
+    }
   };
 
   // Animations
