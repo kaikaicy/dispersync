@@ -1,35 +1,50 @@
-// src/services/ListenToDeviceGetData.js
-import { discoverDispersync } from "./UDPDiscovery";
-
 /**
- * Lightweight listener for an ESP32 endpoint that returns a UID as text.
- * Default endpoint: http://10.166.200.200/getData
+ * Lightweight listener for an ESP32 NFC device endpoint.
+ *
+ * ESP32 Behavior:
+ * - Returns "No Card Scanned Yet" when no NFC card is present
+ * - Returns UID (e.g., "04:BE:F3:0E:BF:2A:81") when card is scanned
+ * - UID is kept for 5 seconds before being cleared
  *
  * API:
- *   const listener = createDeviceListener({ host, intervalMs, requestTimeoutMs });
+ *   const listener = createDeviceListener({ host, intervalMs, requestTimeoutMs, path });
  *   const unsub = listener.onUID((uid, meta) => { ... });
  *   await listener.start();
  *   listener.stop();
  *   const last = listener.getLastReading(); // { uid, at } | null
  *   const uid = await listener.waitForNextUID({ timeoutMs }); // resolves on next UID
  *
- * Extra helpers (non-breaking):
- *   await listener.discoverAndSetHost({ timeoutMs }); // uses UDP discovery to set host
- *   listener.setHost("http://192.168.43.27");         // change target at runtime
- *   listener.getHost();                               // read current host
+ * Runtime controls:
+ *   listener.setHost("http://192.168.43.27"); // change target at runtime
+ *   listener.getHost();                        // read current host
  */
 
-const DEFAULT_HOST = "http://10.166.200.200";
 const DEFAULT_PATH = "/getData";
-const DEFAULT_INTERVAL_MS = 500;
-const DEFAULT_REQ_TIMEOUT_MS = 1000;
+const DEFAULT_INTERVAL_MS = 200;    // sensible minimum — avoids overlapping requests by default
+const DEFAULT_REQ_TIMEOUT_MS = 2000;
+
+function normalizeHost(input) {
+  let h = String(input || "").trim();
+  if (!h) throw new Error("Host is required for createDeviceListener. Provide a valid host URL (e.g. http://172.20.10.2)");
+  // Add scheme if missing
+  if (!/^https?:\/\//i.test(h)) h = "http://" + h;
+  // Remove trailing slashes
+  h = h.replace(/\/+$/, "");
+  // Remove default :80
+  h = h.replace(/:80$/i, "");
+  return h;
+}
+
+function normalizePath(p) {
+  if (!p) return DEFAULT_PATH;
+  return p.startsWith("/") ? p : `/${p}`;
+}
 
 export function createDeviceListener(opts = {}) {
-  // make host/path mutable so we can update them after UDP discovery
-  let host = String(opts.host || DEFAULT_HOST).replace(/\/+$/, "");
-  let path = opts.path || DEFAULT_PATH;
-  let intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
-  let requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQ_TIMEOUT_MS;
+  let host = normalizeHost(opts.host);
+  let path = normalizePath(opts.path || DEFAULT_PATH);
+  let intervalMs = typeof opts.intervalMs === "number" ? opts.intervalMs : DEFAULT_INTERVAL_MS;
+  let requestTimeoutMs = typeof opts.requestTimeoutMs === "number" ? opts.requestTimeoutMs : DEFAULT_REQ_TIMEOUT_MS;
 
   let timer = null;
   let isListening = false;
@@ -37,10 +52,13 @@ export function createDeviceListener(opts = {}) {
   let lastAt = null;
   let lastEmitUID = null;
   let lastEmitAt = 0;
-  const subscribers = new Set(); // (uid, meta) => void
 
-  // waiters for "next UID" promises
-  let pendingResolvers = [];
+  // prevent overlapping polls
+  let inFlight = false;
+  let inFlightController = null;
+
+  const subscribers = new Set(); // (uid, meta) => void
+  let pendingResolvers = [];     // for waitForNextUID
 
   // Optional dummy data for testing
   const DUMMY_UID = "AA:BB:CC:DD:EE";
@@ -58,10 +76,9 @@ export function createDeviceListener(opts = {}) {
 
     const meta = { at: now, host, path };
     subscribers.forEach((cb) => {
-      try { cb(uid, meta); } catch { /* no-op */ }
+      try { cb(uid, meta); } catch (err) { /* no-op */ }
     });
 
-    // resolve any waiters
     if (pendingResolvers.length) {
       const resolvers = [...pendingResolvers];
       pendingResolvers = [];
@@ -71,27 +88,28 @@ export function createDeviceListener(opts = {}) {
     }
   }
 
-  async function pollOnce(abortSignal) {
-    // Return dummy data if enabled
+  async function pollOnce() {
+    if (inFlight) return null;
+
     if (dummyDataEnabled) {
       _emit(DUMMY_UID);
       return DUMMY_UID;
     }
 
-    const ctl = new AbortController();
+    const url = `${host}${path}`;
+    inFlight = true;
+    inFlightController = new AbortController();
+    const ctl = inFlightController;
     const timeout = setTimeout(() => ctl.abort(), requestTimeoutMs);
+
     try {
-      const res = await fetch(`${host}${path}`, {
-        signal: abortSignal || ctl.signal,
-      });
+      const res = await fetch(url, { signal: ctl.signal });
       const text = await res.text();
       const trimmed = String(text || "").trim();
 
-      // Ignore empty/no-scan message
       if (!trimmed || trimmed === "No Card Scanned Yet") return null;
 
-      // If firmware sends JSON later, allow quick parse fallback
-      // e.g. { "uid": "AA:BB:..." }
+      // JSON fallback: { "uid": "AA:BB:..." }
       if (trimmed.startsWith("{")) {
         try {
           const obj = JSON.parse(trimmed);
@@ -99,17 +117,25 @@ export function createDeviceListener(opts = {}) {
             _emit(obj.uid.trim());
             return obj.uid.trim();
           }
-        } catch {
-          // not JSON—fall through to treat as plain text
-        }
+        } catch {/* ignore */}
       }
 
+      // Looks like UID?
+      const uidPattern = /^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){3,}$/; // allow 4+ bytes
+      if (uidPattern.test(trimmed)) {
+        _emit(trimmed.toUpperCase());
+        return trimmed.toUpperCase();
+      }
+
+      // Emit anyway in case firmware format changes later
       _emit(trimmed);
       return trimmed;
     } catch {
       return null;
     } finally {
       clearTimeout(timeout);
+      inFlight = false;
+      inFlightController = null;
     }
   }
 
@@ -119,14 +145,14 @@ export function createDeviceListener(opts = {}) {
   }
 
   function _startTimer() {
-    // kick an immediate poll so UI reacts fast
+    // immediate poll for snappy UX
     pollOnce().finally(() => {});
-
+    // interval loop
     timer = setInterval(() => {
-      // slight jitter helps avoid lockstep with device state
-      const jitter = Math.floor(Math.random() * 50);
+      // light jitter so we don't lockstep with firmware timing
+      const jitter = Math.floor(Math.random() * 40);
       setTimeout(() => { pollOnce(); }, jitter);
-    }, Math.max(200, intervalMs));
+    }, Math.max(150, intervalMs));
   }
 
   async function start() {
@@ -137,24 +163,24 @@ export function createDeviceListener(opts = {}) {
 
   function stop() {
     isListening = false;
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
+    if (timer) { clearInterval(timer); timer = null; }
+    // abort in-flight fetch
+    try { inFlightController?.abort(); } catch {}
+    inFlight = false;
+    inFlightController = null;
   }
 
-  // --- runtime controls (new, backwards-compatible) ---
+  // runtime controls
   function setHost(newHost) {
     if (!newHost) return;
     const old = host;
-    host = String(newHost).replace(/\/+$/, "");
-    // no auto-restart; caller can call start/stop explicitly
+    host = normalizeHost(newHost);
     return { old, host };
   }
   function getHost() { return host; }
 
   function setPath(newPath = DEFAULT_PATH) {
-    path = newPath || DEFAULT_PATH;
+    path = normalizePath(newPath || DEFAULT_PATH);
   }
   function setIntervalMs(ms) {
     if (typeof ms === "number" && ms >= 100) {
@@ -169,21 +195,6 @@ export function createDeviceListener(opts = {}) {
     if (typeof ms === "number" && ms >= 100) requestTimeoutMs = ms;
   }
 
-  /**
-   * Optional helper: discover device via UDP and point the listener at it.
-   * @returns {Promise<{ip:string,port:number,baseUrl:string}|null>}
-   */
-  async function discoverAndSetHost({ timeoutMs = 3000 } = {}) {
-    try {
-      const hit = await discoverDispersync({ timeoutMs });
-      if (hit && hit.baseUrl) {
-        setHost(hit.baseUrl);
-        return hit;
-      }
-    } catch {}
-    return null;
-  }
-
   function getLastReading() {
     return lastUID ? { uid: lastUID, at: lastAt } : null;
   }
@@ -193,11 +204,9 @@ export function createDeviceListener(opts = {}) {
       const entry = { resolve, reject };
       pendingResolvers.push(entry);
       const t = setTimeout(() => {
-        // remove from pending and reject
         pendingResolvers = pendingResolvers.filter((x) => x !== entry);
         reject(new Error("Timed out waiting for next UID"));
-      }, timeoutMs);
-
+      }, Math.max(500, timeoutMs));
       // wrap resolve to clear timeout
       const origResolve = resolve;
       entry.resolve = (uid) => {
@@ -213,12 +222,11 @@ export function createDeviceListener(opts = {}) {
     onUID,
     getLastReading,
     waitForNextUID,
-    discoverAndSetHost,      // NEW (optional)
-    setHost,                 // NEW (optional)
-    getHost,                 // NEW (optional)
-    setPath,                 // NEW (optional)
-    setIntervalMs,           // NEW (optional)
-    setRequestTimeoutMs,     // NEW (optional)
+    setHost,
+    getHost,
+    setPath,
+    setIntervalMs,
+    setRequestTimeoutMs,
     get isListening() { return isListening; },
     get config() { return { host, path, intervalMs, requestTimeoutMs }; },
     // Dummy data controls
@@ -228,14 +236,4 @@ export function createDeviceListener(opts = {}) {
   };
 }
 
-/**
- * A convenient singleton using default config.
- *   import deviceListener from '@/services/ListenToDeviceGetData';
- *   await deviceListener.start();
- *
- * If you prefer discovery first:
- *   const hit = await deviceListener.discoverAndSetHost({ timeoutMs: 3000 });
- *   if (hit) await deviceListener.start();
- */
-const defaultListener = createDeviceListener();
-export default defaultListener;
+// Note: no default singleton here because host is required.

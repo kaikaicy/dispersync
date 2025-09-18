@@ -1,26 +1,21 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Animated, Easing } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path, Rect, Circle, Line } from 'react-native-svg';
+import React, { useEffect, useRef, useState } from "react";
+import { View, Text, TouchableOpacity, Animated, Easing } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Path, Rect, Circle, Line } from "react-native-svg";
+import { useDevice } from "./src/context/DeviceContext";
+import { createDeviceListener } from "./src/services/ListenToDeviceGetData";
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
-import { createDeviceListener } from './src/services/ListenToDeviceGetData';
-import { useDevice } from './src/context/DeviceContext';
 
-
-// Custom SVG icon for the device
+// Simple device SVG
 function DeviceIconSVG({ size = 100 }) {
-  const accent = '#25A18E';
+  const accent = "#25A18E";
   return (
     <Svg width={size} height={size * 1.3} viewBox="0 0 100 130" fill="none">
-      {/* Antenna */}
       <Line x1="80" y1="10" x2="98" y2="-30" stroke={accent} strokeWidth="5" />
-      {/* Device body */}
       <Rect x="10" y="20" width="80" height="100" rx="8" fill="#F8FFFE" stroke={accent} strokeWidth="2" />
-      {/* Screen */}
       <Rect x="25" y="30" width="50" height="28" rx="2" fill="#222" />
-      {/* Buttons */}
       <Circle cx="30" cy="70" r="5" fill="#E3F4EC" stroke={accent} strokeWidth="1.5" />
       <Circle cx="30" cy="85" r="5" fill="#E3F4EC" stroke={accent} strokeWidth="1.5" />
       <Circle cx="50" cy="70" r="5" fill="#E3F4EC" stroke={accent} strokeWidth="1.5" />
@@ -31,97 +26,99 @@ function DeviceIconSVG({ size = 100 }) {
   );
 }
 
-export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onUIDScanned, route }) {
+export default function ConnectDeviceScreen({ navigation }) {
+  const { baseUrl: deviceBaseUrl } = useDevice();
 
-  
   const [scanning, setScanning] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
   const [lastUID, setLastUID] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
-  
-  // Get device base URL from context
-  const { baseUrl: deviceBaseUrl } = useDevice();
 
-  // Create device listener with discovered IP
   const deviceListener = useRef(null);
 
-  // Create device listener with discovered IP
+  // Create/replace listener whenever deviceBaseUrl changes
   useEffect(() => {
-    if (deviceBaseUrl) {
-      console.log('Creating device listener with IP:', deviceBaseUrl);
-      deviceListener.current = createDeviceListener({ 
-        host: deviceBaseUrl,
-        path: '/getData'
-      });
-    } else {
-      setErrorMsg('No device IP provided');
+    if (!deviceBaseUrl) {
+      setErrorMsg("No device URL. Please go back and scan for a device first.");
+      // stop old listener if any
+      if (deviceListener.current) {
+        try { deviceListener.current.stop(); } catch {}
+        deviceListener.current = null;
+      }
+      return;
     }
-  }, [deviceBaseUrl]);
 
-  // Set up UID listener
-  useEffect(() => {
-    if (!deviceListener.current) return;
-
-    const unsubscribe = deviceListener.current.onUID((uid, meta) => {
-      console.log('UID detected:', uid, meta);
-      setLastUID(uid);
-      setScanSuccess(true); 
-      setScanning(false);
+    try {
+      deviceListener.current = createDeviceListener({ host: deviceBaseUrl, path: "/getData" });
       setErrorMsg(null);
-    });
+    } catch (err) {
+      console.error("Listener create error:", err);
+      setErrorMsg("Invalid device URL. Please re-scan the device.");
+      deviceListener.current = null;
+    }
 
     return () => {
-      unsubscribe();
-      // Stop the device listener when component unmounts
+      // clean up listener on URL change/unmount
       if (deviceListener.current) {
-        deviceListener.current.stop();
+        try { deviceListener.current.stop(); } catch {}
+        deviceListener.current = null;
       }
     };
-  }, [deviceListener.current]);
+  }, [deviceBaseUrl]);
 
+  // Subscribe to UID events when a listener exists
+  useEffect(() => {
+    if (!deviceListener.current) return;
+    const unsubscribe = deviceListener.current.onUID((uid) => {
+      setLastUID(uid);
+      setScanSuccess(true);
+      // Stop listening after detecting a UID
+      setScanning(false);
+      setErrorMsg(null);
+      // Stop the listener to prevent continuous polling
+      if (deviceListener.current) {
+        try { deviceListener.current.stop(); } catch {}
+      }
+    });
+    return () => unsubscribe();
+  }, [deviceBaseUrl]);
+
+  // Start polling
   const handleScan = async () => {
     setErrorMsg(null);
     setLastUID(null);
     setScanSuccess(false);
-    setScanning(true);
-    
+
+    if (!deviceListener.current) {
+      setErrorMsg("Device not configured. Re-scan for device first.");
+      return;
+    }
+
     try {
-      if (!deviceListener.current) {
-        setErrorMsg('Device not configured. Please go back and scan for device first.');
-        setScanning(false);
-        return;
-      }
-
-      // Stop any existing listener first
+      // (re)start continuous polling
       deviceListener.current.stop();
-      
-      // Start the listener
       await deviceListener.current.start();
-      
-      // Set a timeout to stop scanning if no UID is detected
-      const timeoutId = setTimeout(() => {
-        if (scanning && !scanSuccess) {
-          setScanning(false);
-          setErrorMsg('No device detected. Please ensure the device is connected and try again.');
-          deviceListener.current.stop();
-        }
-      }, 10000); // 10 second timeout
-
-      // Clean up timeout when component unmounts or scanning stops
-      return () => clearTimeout(timeoutId);
+      setScanning(true);
     } catch (e) {
-      console.error('Error starting device listener:', e);
+      console.error("Start listener error:", e);
       setScanning(false);
-      setErrorMsg('Unable to start listener. Check Wi-Fi connection to the device.');
+      setErrorMsg("Unable to start listening. Check your hotspot connection.");
     }
   };
 
+  const handleStopListening = () => {
+    if (deviceListener.current) {
+      try { deviceListener.current.stop(); } catch {}
+    }
+    setScanning(false);
+    setErrorMsg(null);
+  };
+
   const handleContinue = () => {
-    console.log('Continue to Main screen');
     navigation.replace("Main");
   };
 
-  // Animation for scanning and success
+  // Animations
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const checkAnim = useRef(new Animated.Value(0)).current;
 
@@ -154,119 +151,52 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onU
     }
   }, [scanSuccess]);
 
-  const spin = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '-360deg'],
-  });
-
+  const spin = rotateAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "-360deg"] });
   const checkPath = "M4 12L9 17L20 6";
-  const checkLength = 29; // Approximate length of the check mark path
-
-  const strokeDashoffset = checkAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [checkLength, 0],
-  });
+  const checkLength = 29;
+  const strokeDashoffset = checkAnim.interpolate({ inputRange: [0, 1], outputRange: [checkLength, 0] });
 
   const cardStyle = {
-    backgroundColor: '#F8FFFE',
+    backgroundColor: "#F8FFFE",
     borderRadius: 32,
     padding: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     width: 340,
-    shadowColor: '#25A18E',
+    shadowColor: "#25A18E",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 24,
     elevation: 12,
   };
 
-  const accentColor = '#25A18E';
-  const gradientColors = ['#4fd1c5', '#38b2ac', '#4299e1'];
+  const accentColor = "#25A18E";
+  const gradientColors = ["#4fd1c5", "#38b2ac", "#4299e1"];
 
+  // UI states
   if (scanning) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#e6f4f1', position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-        <View style={[cardStyle, { marginBottom: 0 }]}>
-          <Animated.View
-            style={{
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 110,
-              marginBottom: 24,
-              width: 180,
-              height: 180,
-              transform: [{ rotate: spin }],
-            }}
-          >
-            <LinearGradient
-              colors={gradientColors}
-              style={{
-                width: 180,
-                height: 180,
-                borderRadius: 90,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {/* Radar sweep line */}
-              <View
-                style={{
-                  position: 'absolute',
-                  left: 90 - 2, // center horizontally (width/2 - line width/2)
-                  top: 20,      // start a bit below the top
-                  width: 4,     // thickness of the line
-                  height: 70,   // length of the line (from center to edge)
-                  backgroundColor: '#fff',
-                  opacity: 0.7,
-                  borderRadius: 2,
-                  zIndex: 2,
-                }}
-              />
-              <View
-                style={{
-                  width: 150,
-                  height: 150,
-                  borderRadius: 75,
-                  backgroundColor: '#fff',
-                  opacity: 0.12,
-                  position: 'absolute',
-                }}
-              />
-              <View
-                style={{
-                  width: 120,
-                  height: 120,
-                  borderRadius: 60,
-                  backgroundColor: '#fff',
-                  opacity: 0.07,
-                  position: 'absolute',
-                }}
-              />
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#e6f4f1" }}>
+        <View style={[cardStyle]}>
+          <Animated.View style={{ alignItems: "center", justifyContent: "center", borderRadius: 110, marginBottom: 24, width: 180, height: 180, transform: [{ rotate: spin }] }}>
+            <LinearGradient colors={gradientColors} style={{ width: 180, height: 180, borderRadius: 90, alignItems: "center", justifyContent: "center" }}>
+              <View style={{ position: "absolute", left: 88, top: 20, width: 4, height: 70, backgroundColor: "#fff", opacity: 0.7, borderRadius: 2 }} />
+              <View style={{ width: 150, height: 150, borderRadius: 75, backgroundColor: "#fff", opacity: 0.12, position: "absolute" }} />
+              <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: "#fff", opacity: 0.07, position: "absolute" }} />
             </LinearGradient>
           </Animated.View>
-          <Text
-            style={{
-              color: accentColor,
-              fontWeight: 'bold',
-              fontSize: 22,
-              marginTop: 8,
-              marginBottom: 8,
-              textAlign: 'center',
-            }}
-          >
-            Scan NFC Tag
+          <Text style={{ color: accentColor, fontWeight: "bold", fontSize: 22, marginTop: 8, marginBottom: 8, textAlign: "center" }}>
+            Listening for NFC scan…
           </Text>
-          <Text
-            style={{
-              color: '#666',
-              fontSize: 16,
-              marginTop: 4,
-              textAlign: 'center',
-            }}
-          >
-            Waiting for the device to Scan....
+          <Text style={{ color: "#666", fontSize: 16, marginTop: 4, textAlign: "center" }}>
+            Hold a card near the device reader
           </Text>
+          <TouchableOpacity
+            style={{ backgroundColor: "#fff", borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24, marginTop: 16, borderWidth: 1, borderColor: accentColor }}
+            onPress={handleStopListening}
+          >
+            <Text style={{ color: accentColor, fontWeight: "600", fontSize: 16 }}>Stop Listening</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -274,53 +204,30 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onU
 
   if (scanSuccess) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#e6f4f1', position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-        <View style={[cardStyle, { marginBottom: 0 }]}>
-          <LinearGradient
-            colors={gradientColors}
-            style={{ width: 180, height: 180, borderRadius: 90, alignItems: 'center', justifyContent: 'center', marginBottom: 24 }}
-          >
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#e6f4f1" }}>
+        <View style={[cardStyle]}>
+          <LinearGradient colors={gradientColors} style={{ width: 180, height: 180, borderRadius: 90, alignItems: "center", justifyContent: "center", marginBottom: 24 }}>
             <Svg width={120} height={120} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={3}>
-              <AnimatedPath
-                d={checkPath}
-                strokeDasharray={checkLength}
-                strokeDashoffset={strokeDashoffset}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <AnimatedPath d={checkPath} strokeDasharray={checkLength} strokeDashoffset={strokeDashoffset} strokeLinecap="round" strokeLinejoin="round" />
             </Svg>
           </LinearGradient>
-          <Text
-            style={{
-              color: accentColor,
-              fontWeight: 'bold',
-              fontSize: 22,
-              marginTop: 8,
-              marginBottom: 8,
-              textAlign: 'center',
-            }}
-          >
-            Scan Successful!
+          <Text style={{ color: accentColor, fontWeight: "bold", fontSize: 22, marginTop: 8, marginBottom: 8, textAlign: "center" }}>
+            NFC Card Detected!
           </Text>
           {lastUID && (
-            <Text
-              style={{
-                color: '#666',
-                fontSize: 14,
-                marginBottom: 8,
-                textAlign: 'center',
-                fontFamily: 'monospace',
-              }}
-            >
+            <Text style={{ color: "#666", fontSize: 14, marginBottom: 8, textAlign: "center", fontFamily: "monospace" }}>
               UID: {lastUID}
             </Text>
           )}
-          <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16 }}>
-            <TouchableOpacity onPress={handleScan} style={{ backgroundColor: '#fff', borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24, marginRight: 12, borderWidth: 1, borderColor: accentColor }}>
-              <Text style={{ color: accentColor, fontWeight: '600', fontSize: 16 }}>Scan Again</Text>
+          <Text style={{ color: "#666", fontSize: 12, marginBottom: 16, textAlign: "center", fontStyle: "italic" }}>
+            NFC card successfully detected and processed.
+          </Text>
+          <View style={{ flexDirection: "row", justifyContent: "center", marginTop: 16 }}>
+            <TouchableOpacity onPress={handleStopListening} style={{ backgroundColor: "#fff", borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24, marginRight: 12, borderWidth: 1, borderColor: accentColor }}>
+              <Text style={{ color: accentColor, fontWeight: "600", fontSize: 16 }}>Scan Again</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={handleContinue} style={{ backgroundColor: accentColor, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24 }}>
-              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Continue</Text>
+              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>Continue</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -328,59 +235,64 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onU
     );
   }
 
+  // Idle (not scanning yet)
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#e6f4f1', position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-      <View style={[cardStyle, { marginBottom: 0 }]}>
-        <View style={{ backgroundColor: '#E3F4EC', borderRadius: 80, padding: 32, marginBottom: 32, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#e6f4f1" }}>
+      <View style={[cardStyle]}>
+        <View style={{ backgroundColor: "#E3F4EC", borderRadius: 80, padding: 32, marginBottom: 32, alignItems: "center", justifyContent: "center" }}>
           <DeviceIconSVG size={100} />
         </View>
-        <Text style={{ fontSize: 24, fontWeight: '700', color: accentColor, marginBottom: 8, textAlign: 'center' }}>Connect to Device</Text>
-        <Text style={{ fontSize: 15, color: '#666', marginBottom: 32, textAlign: 'center', paddingHorizontal: 10 }}>
-          {deviceBaseUrl ? `Device IP: ${deviceBaseUrl}` : 'No device IP provided. Please go back and scan for a device first.'}
+        <Text style={{ fontSize: 24, fontWeight: "700", color: accentColor, marginBottom: 8, textAlign: "center" }}>Listen to Device</Text>
+        <Text style={{ fontSize: 15, color: "#666", marginBottom: 32, textAlign: "center", paddingHorizontal: 10 }}>
+          {deviceBaseUrl ? `Connected to ${deviceBaseUrl}` : "No device connected. Go back and scan a device first."}
         </Text>
+
         {deviceBaseUrl ? (
-          <TouchableOpacity onPress={handleScan} style={{ 
-            backgroundColor: accentColor, 
-            borderRadius: 24, 
-            paddingVertical: 16, 
-            paddingHorizontal: 48, 
-            alignItems: 'center', 
-            shadowColor: accentColor, 
-            shadowOffset: { width: 0, height: 4 }, 
-            shadowOpacity: 0.2, 
-            shadowRadius: 12, 
-            elevation: 8, 
-            marginBottom: 16 
-          }}>
-            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 18, letterSpacing: 1 }}>SCAN UID</Text>
+          <TouchableOpacity
+            onPress={handleScan}
+            style={{
+              backgroundColor: accentColor,
+              borderRadius: 24,
+              paddingVertical: 16,
+              paddingHorizontal: 48,
+              alignItems: "center",
+              shadowColor: accentColor,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.2,
+              shadowRadius: 12,
+              elevation: 8,
+              marginBottom: 16,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 18, letterSpacing: 1 }}>START LISTENING</Text>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity onPress={() => {
-            if (navigation) {
-              navigation.goBack();
-            }
-          }} style={{ 
-            backgroundColor: accentColor, 
-            borderRadius: 24, 
-            paddingVertical: 16, 
-            paddingHorizontal: 48, 
-            alignItems: 'center', 
-            shadowColor: accentColor, 
-            shadowOffset: { width: 0, height: 4 }, 
-            shadowOpacity: 0.2, 
-            shadowRadius: 12, 
-            elevation: 8, 
-            marginBottom: 16 
-          }}>
-            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 18, letterSpacing: 1 }}>Go Back</Text>
+          <TouchableOpacity
+            onPress={() => navigation && navigation.goBack()}
+            style={{
+              backgroundColor: accentColor,
+              borderRadius: 24,
+              paddingVertical: 16,
+              paddingHorizontal: 48,
+              alignItems: "center",
+              shadowColor: accentColor,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.2,
+              shadowRadius: 12,
+              elevation: 8,
+              marginBottom: 16,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 18, letterSpacing: 1 }}>Go Back</Text>
           </TouchableOpacity>
         )}
+
         {errorMsg && (
-          <Text style={{ color: '#e53e3e', fontSize: 14, textAlign: 'center', marginTop: 8, paddingHorizontal: 20 }}>
+          <Text style={{ color: "#e53e3e", fontSize: 14, textAlign: "center", marginTop: 8, paddingHorizontal: 20 }}>
             {errorMsg}
           </Text>
         )}
       </View>
     </View>
   );
-} 
+}
