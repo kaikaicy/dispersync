@@ -15,6 +15,7 @@ import ListOfBeneficiaries from './ListOfBeneficiaries';
 import ListToInspect from './ListToInspect';
 import ListForDispersal from './ListForDispersal';
 import Transfer from './Transfer';
+import { useDevice } from './src/context/DeviceContext';
 
 // Import logo images
 const leftLogo = require('./assets/images/logoleft.png');
@@ -108,13 +109,13 @@ export default function MainScreen({ navigation, route }) {
   const [showTransactionScreen, setShowTransactionScreen] = useState(null);
   const [scannedUID, setScannedUID] = useState(null);
   
-  // Get device IP from route params (passed from Login)
-  const deviceBaseUrl = route?.params?.deviceBaseUrl;
+  // Get device IP from context
+  const { baseUrl: deviceBaseUrl } = useDevice();
   
   // Debug logging
   useEffect(() => {
     if (deviceBaseUrl) {
-      console.log('MainScreen received device IP:', deviceBaseUrl);
+      console.log('MainScreen received device IP from context:', deviceBaseUrl);
     }
   }, [deviceBaseUrl]);
 
@@ -187,13 +188,12 @@ export default function MainScreen({ navigation, route }) {
     if (activeTab === 'Profile') {
       return <ProfileScreen navigation={navigation} />;
     } else if (activeTab === 'Scan') {
-      console.log('MainScreen navigating to ConnectDeviceScreen with device IP:', deviceBaseUrl);
+      console.log('MainScreen navigating to ConnectDeviceScreen with device IP from context:', deviceBaseUrl);
       return <ConnectDeviceScreen 
         onBack={() => setActiveTab('Dashboard')} 
         onConnect={() => setActiveTab('Transaction')} 
         onUIDScanned={(uid) => setScannedUID(uid)}
         navigation={navigation}
-        route={{ params: { deviceBaseUrl: deviceBaseUrl } }}
       />;
     } else if (activeTab === 'Transaction') {
       return <Transaction 

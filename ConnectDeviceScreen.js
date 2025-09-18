@@ -6,6 +6,7 @@ import Svg, { Path, Rect, Circle, Line } from 'react-native-svg';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 import { createDeviceListener } from './src/services/ListenToDeviceGetData';
+import { useDevice } from './src/context/DeviceContext';
 
 
 // Custom SVG icon for the device
@@ -38,8 +39,8 @@ export default function ConnectDeviceScreen({ onBack, onConnect, navigation, onU
   const [lastUID, setLastUID] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   
-  // Get device base URL from route params (passed from Login)
-  const deviceBaseUrl = route?.params?.deviceBaseUrl;
+  // Get device base URL from context
+  const { baseUrl: deviceBaseUrl } = useDevice();
 
   // Create device listener with discovered IP
   const deviceListener = useRef(null);

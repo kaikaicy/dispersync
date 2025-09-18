@@ -1,120 +1,81 @@
 // src/services/UDPDiscovery.js
-import "react-native-get-random-values"; // safe polyfill, early
+import "react-native-get-random-values";
 import dgram from "react-native-udp";
 import { Buffer } from "buffer";
 
 if (!global.Buffer) global.Buffer = Buffer;
 
-const DISCOVERY_PORT = 40000;
-const DISCOVERY_MESSAGE = "DISPERSYNC_DISCOVER";
+const LISTEN_PORT = 40000;
 
-// Extra broadcast targets help on some OEMs when hotspot is active.
-const BROADCAST_TARGETS = [
-  "255.255.255.255",
-  "192.168.43.255",
-  "192.168.42.255",
-  "192.168.137.255",
-  "10.0.0.255",
-];
+// Singleton socket + waiter list
+let sock = null;
+let bound = false;
+let closed = false;
+const waiters = new Set(); // { resolve, timer }
+
+function ensureSocket() {
+  if (sock) return sock;
+  try {
+    sock = dgram.createSocket("udp4");
+  } catch (e) {
+    throw new Error("UDP not available in this build. Rebuild your dev client with react-native-udp.");
+  }
+
+  sock.on("close", () => { closed = true; });
+  sock.on("error", (e) => {
+    console.warn("UDP listener error:", e?.message || e);
+    // Don’t reject active waiters; they will timeout naturally
+  });
+
+  sock.on("message", (msg, rinfo) => {
+    const payload = (msg?.toString("utf8") || "").trim();
+    let ip = rinfo?.address;
+    let portFound = 80;
+
+    if (payload.startsWith("{")) {
+      try {
+        const obj = JSON.parse(payload);
+        if (obj && obj.ip) ip = obj.ip;
+        if (obj && obj.port) portFound = obj.port;
+      } catch {
+        // ignore malformed json
+      }
+    }
+    const result = { ip, port: portFound, baseUrl: `http://${ip}:${portFound}` };
+
+    // Deliver to all current waiters (first packet wins for them)
+    if (waiters.size) {
+      [...waiters].forEach((w) => {
+        clearTimeout(w.timer);
+        w.resolve(result);
+        waiters.delete(w);
+      });
+    }
+  });
+
+  sock.bind(LISTEN_PORT, "0.0.0.0", () => { bound = true; });
+  return sock;
+}
 
 /**
- * Broadcast UDP discovery and wait for a reply.
- * Resolves to { ip, port, baseUrl } or null.
- * Throws only on fatal setup error (e.g., UDP module missing).
+ * Wait for a single beacon. Socket stays open across calls.
+ * Resolves { ip, port, baseUrl } or null on timeout.
  */
-export function discoverDispersync({
-  timeoutMs = 3000,
-  attempts = 2,
-  intervalMs = 600,
-  port = DISCOVERY_PORT,
-  message = DISCOVERY_MESSAGE,
-} = {}) {
-  return new Promise((resolve, reject) => {
-    let socket;
-    try {
-      socket = dgram.createSocket("udp4");
-    } catch (e) {
-      // Most common cause: dev client not rebuilt with react-native-udp
-      return reject(
-        new Error(
-          "UDP not available. Rebuild your Expo dev client after installing `react-native-udp`."
-        )
-      );
-    }
-
-    let resolved = false;
-    let attemptIndex = 0;
-    const buf = Buffer.from(message, "utf8");
-
-    const finish = (result) => {
-      if (resolved) return;
-      resolved = true;
-      try { socket.close(); } catch {}
-      resolve(result);
-    };
-
-    const hardFail = (err) => {
-      if (resolved) return;
-      resolved = true;
-      try { socket.close(); } catch {}
-      reject(err);
-    };
-
-    // Overall timeout
-    const killer = setTimeout(() => finish(null), Math.max(1000, timeoutMs));
-
-    socket.on("message", (msg, rinfo) => {
-      try {
-        const txt = msg.toString("utf8").trim();
-        let ip = rinfo?.address;
-        let portFound = 80;
-
-        if (txt.startsWith("{")) {
-          const obj = JSON.parse(txt);
-          if (obj && obj.ip) ip = obj.ip;
-          if (obj && obj.port) portFound = obj.port;
-        }
-        clearTimeout(killer);
-        finish({ ip, port: portFound, baseUrl: `http://${ip}:${portFound}` });
-      } catch {
-        // ignore malformed packets
-      }
-    });
-
-    socket.on("error", (e) => {
-      // Don’t crash the UI — treat as “no device”
-      clearTimeout(killer);
-      finish(null);
-    });
-
-    const sendBurst = () => {
-      try {
-        for (const target of BROADCAST_TARGETS) {
-          socket.send(buf, 0, buf.length, port, target, () => {});
-        }
-      } catch {
-        // ignore; next attempt may succeed
-      }
-    };
-
-    socket.bind(0, () => {
-      try { socket.setBroadcast(true); } catch {}
-      // first burst immediately
-      sendBurst();
-
-      // then retry bursts until attempts exhausted or we resolve
-      const tick = setInterval(() => {
-        if (resolved) {
-          clearInterval(tick);
-          return;
-        }
-        attemptIndex += 1;
-        if (attemptIndex >= attempts) {
-          clearInterval(tick);
-          return;
-        }
-        sendBurst();
-      }, Math.max(200, intervalMs));
-    });
+export function waitForBeacon({ timeoutMs = 8000 } = {}) {
+  ensureSocket();
+  return new Promise((resolve) => {
+    const entry = { resolve, timer: null };
+    entry.timer = setTimeout(() => {
+      waiters.delete(entry);
+      resolve(null);
+    }, Math.max(1200, timeoutMs));
+    waiters.add(entry);
   });
+}
+
+/**
+ * Convenience wrapper (keeps your old name)
+ */
+export async function discoverDispersync(opts = {}) {
+  return waitForBeacon(opts);
 }

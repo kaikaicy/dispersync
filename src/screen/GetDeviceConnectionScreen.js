@@ -3,43 +3,32 @@ import React, { useState } from "react";
 import { View, Text, TouchableOpacity, Alert, StyleSheet, ActivityIndicator } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useKeepAwake } from "expo-keep-awake";
+import { useDevice } from "../context/DeviceContext";
 import { findDispersyncOnSubnet, whoAmI } from "../services/GetDeviceNetwork";
+
+async function ping(baseUrl, timeoutMs = 700) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  const { setBaseUrl } = useDevice();
+  try {
+    const r = await fetch(`${baseUrl}/ping`, { signal: ctl.signal });
+    const txt = (await r.text()).trim();
+    return r.ok && txt.toUpperCase() === "OK";
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 export default function GetDeviceConnectionScreen({ navigation }) {
   const [scanning, setScanning] = useState(false);
-  const [baseUrl, setBaseUrl] = useState(null);
+  const [deviceInfo, setDeviceInfo] = useState(null);
+  const { baseUrl, setBaseUrl } = useDevice();
 
-  const onFind = async () => {
-    setScanning(true);
-    setBaseUrl(null);
-    try {
-      const found = await findDispersyncOnSubnet({ timeoutMs: 3000 });
-
-      if (!found) {
-        Alert.alert(
-          "Not found",
-          "No device replied to discovery.\nMake sure the ESP32 is connected to THIS phone’s hotspot and powered on."
-        );
-        return;
-      }
-
-      setBaseUrl(found.baseUrl);
-
-      // Optional identity check (ignore failure)
-      await whoAmI(found.baseUrl).catch(() => null);
-
-      // Go straight to Login with the found baseUrl
-      navigation.replace("Login", { deviceBaseUrl: found.baseUrl });
-    } catch (e) {
-      console.error("Scan error:", e);
-      Alert.alert(
-        "Discovery error",
-        (e && e.message) || "Couldn’t start UDP discovery. Did you rebuild the dev client?"
-      );
-    } finally {
-      setScanning(false);
-    }
-  };
+  useKeepAwake(scanning); // keep radio alive while scanning
 
   const colors = {
     primary: "#25A18E",
@@ -47,9 +36,44 @@ export default function GetDeviceConnectionScreen({ navigation }) {
     accent: "#4fd1c5",
     background: "#e6f4f1",
     white: "#FFFFFF",
-    text: "#25A18E",
-    textLight: "#666",
-    border: "#E3F4EC",
+  };
+
+  const onFind = async () => {
+    setScanning(true);
+    setDeviceInfo(null);
+    try {
+      const found = await findDispersyncOnSubnet({ timeoutMs: 8000 });
+      if (!found) {
+        Alert.alert(
+          "Not found",
+          "No device replied. Ensure the ESP32 is connected to THIS phone's hotspot and powered on."
+        );
+        return;
+      }
+
+      // Store in context (this will update the UI to show "Device Found" section)
+      setBaseUrl(found.baseUrl);
+
+      // Optional whoami
+      const who = await whoAmI(found.baseUrl).catch(() => null);
+      if (who) setDeviceInfo(who);
+
+      // Don't navigate automatically - let user see the "Device Found" section and choose when to proceed
+    } catch (e) {
+      Alert.alert("Discovery error", e?.message || "Could not listen for the device.");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const onUseDevice = () => {
+    if (!baseUrl) return;
+    navigation.replace("Login");
+  };
+
+  const onScanAgain = () => {
+    setDeviceInfo(null);
+    onFind();
   };
 
   return (
@@ -61,8 +85,8 @@ export default function GetDeviceConnectionScreen({ navigation }) {
               <Ionicons name="wifi" size={40} color={colors.white} />
             </LinearGradient>
           </View>
-          <Text style={styles.title}>Broadcasting…</Text>
-          <Text style={styles.subtitle}>Looking for a DisperSync reply</Text>
+          <Text style={styles.title}>Listening…</Text>
+          <Text style={styles.subtitle}>Waiting for a DisperSync beacon</Text>
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 16 }} />
           <TouchableOpacity style={styles.secondaryButton} onPress={() => setScanning(false)} activeOpacity={0.7}>
             <Text style={styles.secondaryButtonText}>Cancel</Text>
@@ -79,25 +103,49 @@ export default function GetDeviceConnectionScreen({ navigation }) {
           <Text style={styles.title}>Find DisperSync Device</Text>
           <Text style={styles.subtitle}>Connect to a nearby DisperSync device to continue</Text>
 
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity style={styles.primaryButton} onPress={onFind} activeOpacity={0.8}>
-              <LinearGradient colors={[colors.accent, colors.secondary, colors.primary]} style={styles.buttonGradient}>
-                <Ionicons name="search" size={20} color={colors.white} style={styles.buttonIcon} />
-                <Text style={styles.primaryButtonText}>Scan Device</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+          {!baseUrl ? (
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity style={styles.primaryButton} onPress={onFind} activeOpacity={0.8}>
+                <LinearGradient colors={[colors.accent, colors.secondary, colors.primary]} style={styles.buttonGradient}>
+                  <Ionicons name="search" size={20} color={colors.white} style={styles.buttonIcon} />
+                  <Text style={styles.primaryButtonText}>Scan Device</Text>
+                </LinearGradient>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.navigate("Login")} activeOpacity={0.7}>
-              <Text style={styles.secondaryButtonText}>Cancel Scan</Text>
-            </TouchableOpacity>
-          </View>
-
-          {baseUrl ? (
-            <View style={styles.selectedContainer}>
-              <Text style={styles.selectedLabel}>Device Found</Text>
-              <Text style={styles.selectedUrl}>{baseUrl}</Text>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => navigation.navigate("Login")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel Scan</Text>
+              </TouchableOpacity>
             </View>
-          ) : null}
+          ) : (
+            <>
+              <View style={styles.selectedContainer}>
+                <Text style={styles.selectedLabel}>Device Found</Text>
+                <Text style={styles.selectedUrl}>{baseUrl}</Text>
+                {deviceInfo ? (
+                  <Text style={styles.deviceMeta}>{JSON.stringify(deviceInfo)}</Text>
+                ) : (
+                  <Text style={styles.deviceMetaMuted}>(No extra device info)</Text>
+                )}
+              </View>
+
+              <View style={[styles.buttonContainer, { marginTop: 16 }]}>
+                <TouchableOpacity style={styles.primaryButton} onPress={onUseDevice} activeOpacity={0.8}>
+                  <LinearGradient colors={[colors.accent, colors.secondary, colors.primary]} style={styles.buttonGradient}>
+                    <Ionicons name="checkmark" size={20} color={colors.white} style={styles.buttonIcon} />
+                    <Text style={styles.primaryButtonText}>Use This Device</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.secondaryButton} onPress={onScanAgain} activeOpacity={0.7}>
+                  <Text style={styles.secondaryButtonText}>Scan Again</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
       )}
     </View>
@@ -113,7 +161,7 @@ const styles = StyleSheet.create({
   iconContainer: { marginBottom: 24 },
   gradientIcon: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center" },
   title: { fontSize: 24, fontWeight: "700", color: "#25A18E", marginBottom: 8, textAlign: "center" },
-  subtitle: { fontSize: 15, color: "#666", marginBottom: 32, textAlign: "center", paddingHorizontal: 10 },
+  subtitle: { fontSize: 15, color: "#666", marginBottom: 24, textAlign: "center", paddingHorizontal: 10 },
   buttonContainer: { width: "100%", gap: 16 },
   primaryButton: {
     borderRadius: 24, overflow: "hidden", shadowColor: "#25A18E", shadowOffset: { width: 0, height: 4 },
@@ -124,7 +172,10 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: "#fff", fontWeight: "600", fontSize: 18, letterSpacing: 1 },
   secondaryButton: { paddingVertical: 12, paddingHorizontal: 24, alignItems: "center" },
   secondaryButtonText: { color: "#25A18E", fontWeight: "600", fontSize: 16 },
-  selectedContainer: { marginTop: 24, padding: 16, backgroundColor: "#E3F4EC", borderRadius: 12, width: "100%", alignItems: "center" },
-  selectedLabel: { fontSize: 16, fontWeight: "600", color: "#25A18E", marginBottom: 4 },
-  selectedUrl: { fontSize: 14, color: "#666", fontFamily: "monospace" },
+
+  selectedContainer: { marginTop: 8, padding: 16, backgroundColor: "#E3F4EC", borderRadius: 12, width: "100%", alignItems: "center" },
+  selectedLabel: { fontSize: 16, fontWeight: "600", color: "#25A18E", marginBottom: 6 },
+  selectedUrl: { fontSize: 14, color: "#333", fontFamily: "monospace" },
+  deviceMeta: { marginTop: 6, fontSize: 12, color: "#444", textAlign: "center" },
+  deviceMetaMuted: { marginTop: 6, fontSize: 12, color: "#888", textAlign: "center" },
 });
