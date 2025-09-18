@@ -18,16 +18,20 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import {
   collection, query, where, getDocs, doc, getDoc
 } from "firebase/firestore";
+import { useDevice } from "../context/DeviceContext";
 
 // ... your other imports like styles, logo, etc.
 
-export default function LoginPage({ navigation }) {
+export default function LoginPage({ navigation, route }) {
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [userIdError, setUserIdError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  
+  // Get device IP from context
+  const { baseUrl: deviceBaseUrl } = useDevice();
 
   // 🔎 Find email by the numeric User ID stored in Firestore
   // Assumes each staff doc has a field: userId (string or numeric-like string, e.g. "12345")
@@ -95,7 +99,8 @@ export default function LoginPage({ navigation }) {
         // navigation.replace('Main', { staff: staffData });
       }
 
-      // 4) Go to Main after successful login
+      // 4) Navigate to Main after successful login (device IP is now in context)
+      console.log('Login successful, navigating to Main');
       navigation.replace("Main");
     } catch (err) {
       console.error("Login failed:", err?.message || err);

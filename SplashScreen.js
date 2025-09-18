@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Image, StyleSheet, Animated } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const logo = require('./assets/images/logo.png');
 
@@ -8,6 +9,19 @@ export default function SplashScreen({ navigation }) {
   const logoOpacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    // Clear device context storage on app startup
+    const clearDeviceStorage = async () => {
+      try {
+        await AsyncStorage.removeItem('@ds:lastBaseUrl');
+        console.log('Device context storage cleared on app startup');
+      } catch (error) {
+        console.log('Error clearing device storage:', error);
+      }
+    };
+
+    // Clear storage immediately when component mounts
+    clearDeviceStorage();
+
     const steadyTimer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(logoTranslateY, {
@@ -21,9 +35,9 @@ export default function SplashScreen({ navigation }) {
           useNativeDriver: true,
         })
       ]).start(() => {
-        navigation.replace('Login');
+        navigation.replace('GetDeviceConnection');
       });
-    }, 5000); // 5 seconds steady
+    }, 1000); // 1 second steady
     return () => clearTimeout(steadyTimer);
   }, [navigation, logoTranslateY, logoOpacity]);
 
