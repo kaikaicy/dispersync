@@ -1,8 +1,9 @@
-// services/ListenToDeviceGetData.js
+// src/services/ListenToDeviceGetData.js
+import { discoverDispersync } from "./UDPDiscovery";
 
 /**
  * Lightweight listener for an ESP32 endpoint that returns a UID as text.
- * Default endpoint: http://192.168.4.1/getData
+ * Default endpoint: http://10.166.200.200/getData
  *
  * API:
  *   const listener = createDeviceListener({ host, intervalMs, requestTimeoutMs });
@@ -11,20 +12,24 @@
  *   listener.stop();
  *   const last = listener.getLastReading(); // { uid, at } | null
  *   const uid = await listener.waitForNextUID({ timeoutMs }); // resolves on next UID
+ *
+ * Extra helpers (non-breaking):
+ *   await listener.discoverAndSetHost({ timeoutMs }); // uses UDP discovery to set host
+ *   listener.setHost("http://192.168.43.27");         // change target at runtime
+ *   listener.getHost();                               // read current host
  */
 
-//const DEFAULT_HOST = "http://10.101.119.200";
-//const DEFAULT_HOST = "http://172.16.35.200";
 const DEFAULT_HOST = "http://10.166.200.200";
 const DEFAULT_PATH = "/getData";
 const DEFAULT_INTERVAL_MS = 500;
 const DEFAULT_REQ_TIMEOUT_MS = 1000;
 
 export function createDeviceListener(opts = {}) {
-  const host = String(opts.host || DEFAULT_HOST).replace(/\/+$/, "");
-  const path = opts.path || DEFAULT_PATH;
-  const intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQ_TIMEOUT_MS;
+  // make host/path mutable so we can update them after UDP discovery
+  let host = String(opts.host || DEFAULT_HOST).replace(/\/+$/, "");
+  let path = opts.path || DEFAULT_PATH;
+  let intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
+  let requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQ_TIMEOUT_MS;
 
   let timer = null;
   let isListening = false;
@@ -37,8 +42,8 @@ export function createDeviceListener(opts = {}) {
   // waiters for "next UID" promises
   let pendingResolvers = [];
 
-  // Temporary dummy data for testing
-  //const DUMMY_UID = "AA:BB:CC:DD:EE";
+  // Optional dummy data for testing
+  const DUMMY_UID = "AA:BB:CC:DD:EE";
   let dummyDataEnabled = false;
 
   function _emit(uid) {
@@ -113,10 +118,7 @@ export function createDeviceListener(opts = {}) {
     return () => subscribers.delete(cb);
   }
 
-  async function start() {
-    if (isListening) return;
-    isListening = true;
-
+  function _startTimer() {
     // kick an immediate poll so UI reacts fast
     pollOnce().finally(() => {});
 
@@ -127,12 +129,59 @@ export function createDeviceListener(opts = {}) {
     }, Math.max(200, intervalMs));
   }
 
+  async function start() {
+    if (isListening) return;
+    isListening = true;
+    _startTimer();
+  }
+
   function stop() {
     isListening = false;
     if (timer) {
       clearInterval(timer);
       timer = null;
     }
+  }
+
+  // --- runtime controls (new, backwards-compatible) ---
+  function setHost(newHost) {
+    if (!newHost) return;
+    const old = host;
+    host = String(newHost).replace(/\/+$/, "");
+    // no auto-restart; caller can call start/stop explicitly
+    return { old, host };
+  }
+  function getHost() { return host; }
+
+  function setPath(newPath = DEFAULT_PATH) {
+    path = newPath || DEFAULT_PATH;
+  }
+  function setIntervalMs(ms) {
+    if (typeof ms === "number" && ms >= 100) {
+      intervalMs = ms;
+      if (isListening) {
+        clearInterval(timer);
+        _startTimer();
+      }
+    }
+  }
+  function setRequestTimeoutMs(ms) {
+    if (typeof ms === "number" && ms >= 100) requestTimeoutMs = ms;
+  }
+
+  /**
+   * Optional helper: discover device via UDP and point the listener at it.
+   * @returns {Promise<{ip:string,port:number,baseUrl:string}|null>}
+   */
+  async function discoverAndSetHost({ timeoutMs = 3000 } = {}) {
+    try {
+      const hit = await discoverDispersync({ timeoutMs });
+      if (hit && hit.baseUrl) {
+        setHost(hit.baseUrl);
+        return hit;
+      }
+    } catch {}
+    return null;
   }
 
   function getLastReading() {
@@ -164,6 +213,12 @@ export function createDeviceListener(opts = {}) {
     onUID,
     getLastReading,
     waitForNextUID,
+    discoverAndSetHost,      // NEW (optional)
+    setHost,                 // NEW (optional)
+    getHost,                 // NEW (optional)
+    setPath,                 // NEW (optional)
+    setIntervalMs,           // NEW (optional)
+    setRequestTimeoutMs,     // NEW (optional)
     get isListening() { return isListening; },
     get config() { return { host, path, intervalMs, requestTimeoutMs }; },
     // Dummy data controls
@@ -177,6 +232,10 @@ export function createDeviceListener(opts = {}) {
  * A convenient singleton using default config.
  *   import deviceListener from '@/services/ListenToDeviceGetData';
  *   await deviceListener.start();
+ *
+ * If you prefer discovery first:
+ *   const hit = await deviceListener.discoverAndSetHost({ timeoutMs: 3000 });
+ *   if (hit) await deviceListener.start();
  */
 const defaultListener = createDeviceListener();
 export default defaultListener;
