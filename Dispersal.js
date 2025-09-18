@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Platform, Modal, Alert, SafeAreaView, Image
@@ -11,9 +11,10 @@ import DropdownListComponent from './src/components/DropdownListComponent';
 // 🔥 Firebase (your path)
 import { auth, db } from './src/config/firebase';
 import {
-  collection, getDocs, query, where, limit,
-  doc, setDoc, addDoc, Timestamp, serverTimestamp
+  collection, getDocs, query, where, limit, orderBy,
+  doc, setDoc, addDoc, Timestamp, serverTimestamp, onSnapshot, getDoc
 } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 // helper: calculate age from Firestore Timestamp
 const calculateAge = (birthdayTs) => {
@@ -41,7 +42,8 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
   const [selectedApplicant, setSelectedApplicant] = useState(null); // {id, fullName, municipality, barangay, address?, gender?, birthday?, contact?, livestock?}
   const [applicantResults, setApplicantResults] = useState([]);
   const [showApplicantModal, setShowApplicantModal] = useState(false);
-  const [isSearchingApplicants, setIsSearchingApplicants] = useState(false);
+  const [isLoadingApplicants, setIsLoadingApplicants] = useState(false);
+  const [staffMunicipality, setStaffMunicipality] = useState(null);
 
   const [livestockType, setLivestockType] = useState(''); // prefilled if applicant has one, editable
   const [livestockColor, setLivestockColor] = useState('');
@@ -49,19 +51,112 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
   const [livestockBreed, setLivestockBreed] = useState('');
   const [livestockMarkings, setLivestockMarkings] = useState('');
 
-  const [municipality, setMunicipality] = useState('');
 
   // Start as null → user must pick a date (not defaulting to today)
   const [dateDisperse, setDateDisperse] = useState(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  const [showMunicipalityPicker, setShowMunicipalityPicker] = useState(false);
+  const [isLoadingScheduled, setIsLoadingScheduled] = useState(false);
 
-  // Static location data
-  const municipalities = [
-    'Basud', 'Capalonga', 'Daet', 'Jose Panganiban', 'Labo', 'Mercedes',
-    'Paracale', 'San Lorenzo Ruiz', 'San Vicente', 'Sta. Elena', 'Talisay', 'Vinzons'
-  ];
+
+  // ————————————————————————————————————————
+  // Get staff municipality on auth state change
+  // ————————————————————————————————————————
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      try {
+        if (!user) {
+          setStaffMunicipality(null);
+          return;
+        }
+        // read staff profile to get municipality
+        const staffRef = collection(db, 'staff');
+        const q = query(staffRef, where('uid', '==', user.uid));
+        const snap = await getDocs(q);
+        const data = snap.docs[0]?.data() || {};
+        const muni = data.municipality || data.Municipality || data?.location?.municipality || null;
+        setStaffMunicipality(typeof muni === 'string' ? muni : null);
+      } catch (e) {
+        console.error('Load staff municipality failed:', e);
+        setStaffMunicipality(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // ————————————————————————————————————————
+  // Load all scheduled applicants for staff municipality
+  // ————————————————————————————————————————
+  useEffect(() => {
+    if (!staffMunicipality) return;
+
+    const loadScheduledApplicants = async () => {
+      setIsLoadingApplicants(true);
+      try {
+        // Get all scheduled applicants for the staff's municipality
+        const schedulesQuery = query(
+          collection(db, 'dispersalSchedules'),
+          where('municipality', '==', staffMunicipality)
+        );
+        const schedulesSnap = await getDocs(schedulesQuery);
+        
+        if (schedulesSnap.empty) {
+          console.log('No scheduled applicants found for municipality:', staffMunicipality);
+          setApplicantResults([]);
+          return;
+        }
+
+        // Convert to dropdown format and sort by scheduledFor
+        const schedules = schedulesSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })).sort((a, b) => {
+          // Sort by scheduledFor timestamp
+          const aTime = a.scheduledFor?.toDate ? a.scheduledFor.toDate() : new Date(a.scheduledFor || 0);
+          const bTime = b.scheduledFor?.toDate ? b.scheduledFor.toDate() : new Date(b.scheduledFor || 0);
+          return aTime - bTime;
+        });
+
+        const dropdownOptions = schedules.map(schedule => {
+          const mockApplicant = {
+            id: schedule.id,
+            applicantId: schedule.applicantId, // Add applicantId for fetching from applicants collection
+            fullName: schedule.applicantName || 'Unknown',
+            municipality: schedule.municipality || '',
+            barangay: schedule.barangay || '',
+            address: schedule.address || '',
+            gender: schedule.gender || null,
+            birthday: schedule.birthday || null,
+            contact: schedule.contact || '',
+            livestock: schedule.livestock || ''
+          };
+          
+          return {
+            value: mockApplicant.id,
+            label: mockApplicant.fullName,
+            subtitle: `${mockApplicant.barangay || '-'}, ${mockApplicant.municipality || '-'}${mockApplicant.livestock ? ` • ${mockApplicant.livestock}` : ''}`,
+            data: mockApplicant
+          };
+        });
+
+        setApplicantResults(dropdownOptions);
+
+        // If we have a scanned UID, auto-select the first applicant
+        if (scannedUID && dropdownOptions.length > 0) {
+          const firstOption = dropdownOptions[0];
+          selectApplicant(firstOption);
+        }
+
+      } catch (error) {
+        console.error('Error loading scheduled applicants:', error);
+        setApplicantResults([]);
+      } finally {
+        setIsLoadingApplicants(false);
+      }
+    };
+
+    loadScheduledApplicants();
+  }, [staffMunicipality, scannedUID]);
 
   // ————————————————————————————————————————
   // Image helpers (documentation)
@@ -85,69 +180,12 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
     if (!result.canceled) setImage(result.assets[0].uri);
   };
 
-  // ————————————————————————————————————————
-  // Applicant search (Firestore)
-  // ————————————————————————————————————————
-  const searchApplicants = async (searchTerm) => {
-    const term = (searchTerm || '').trim();
-    if (!term) {
-      setApplicantResults([]);
-      return;
-    }
-
-    setIsSearchingApplicants(true);
-    try {
-      // Range match on fullName. If you also store fullNameLower, switch to that for case-insensitive querying.
-      const q1 = query(
-        collection(db, 'applicants'),
-        where('fullName', '>=', term),
-        where('fullName', '<=', term + '\uf8ff'),
-        limit(10)
-      );
-      const snap1 = await getDocs(q1);
-
-      let results = snap1.docs.map((d) => ({ id: d.id, ...d.data() }));
-      if (results.length === 0) {
-        // Fallback: sample + local filter
-        const q2 = query(collection(db, 'applicants'), limit(20));
-        const snap2 = await getDocs(q2);
-        const termLower = term.toLowerCase();
-        results = snap2.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((r) => (r.fullName || '').toLowerCase().includes(termLower));
-      }
-
-      // Convert to dropdown format
-      const dropdownOptions = results.map(applicant => ({
-        value: applicant.id,
-        label: applicant.fullName || 'Unknown',
-        subtitle: `${applicant.municipality || '-'}${applicant.livestock ? ` • ${applicant.livestock}` : ''}`,
-        data: applicant
-      }));
-
-      setApplicantResults(dropdownOptions);
-    } catch (e) {
-      console.error('searchApplicants error:', e);
-      setApplicantResults([]);
-    } finally {
-      setIsSearchingApplicants(false);
-    }
-  };
 
   const selectApplicant = (option) => {
     const app = option.data || option; // Handle both dropdown format and direct data
     setSelectedApplicant(app);
     setCurrentBeneficiary(app.fullName || '');
-    setMunicipality(app.municipality || '');
     setLivestockType(app.livestock || ''); // keep editable if blank
-  };
-
-  // ————————————————————————————————————————
-  // Municipality picker
-  // ————————————————————————————————————————
-  const handleMunicipalitySelect = (selectedMunicipality) => {
-    setMunicipality(selectedMunicipality);
-    setShowMunicipalityPicker(false);
   };
 
   // ————————————————————————————————————————
@@ -170,13 +208,35 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
         Alert.alert('Missing livestock type', 'Please provide a livestock type.');
         return;
       }
-      if (!municipality) {
-        Alert.alert('Location required', 'Please select municipality.');
+      if (!selectedApplicant?.municipality) {
+        Alert.alert('Location required', 'Applicant municipality not found.');
         return;
       }
       if (!dateDisperse) {
         Alert.alert('Date required', 'Please pick the dispersal date.');
         return;
+      }
+
+      // Get applicant details from applicants collection using applicantId
+      let applicantDetails = null;
+      console.log('Selected applicant:', selectedApplicant);
+      console.log('Applicant ID:', selectedApplicant.applicantId);
+      
+      if (selectedApplicant.applicantId) {
+        try {
+          const applicantDocRef = doc(db, 'applicants', selectedApplicant.applicantId);
+          const applicantDoc = await getDoc(applicantDocRef);
+          if (applicantDoc.exists()) {
+            applicantDetails = applicantDoc.data();
+            console.log('Fetched applicant details:', applicantDetails);
+          } else {
+            console.log('Applicant document not found');
+          }
+        } catch (error) {
+          console.error('Error fetching applicant details:', error);
+        }
+      } else {
+        console.log('No applicantId found in selectedApplicant');
       }
 
       // — 1) Save to "livestock"
@@ -185,7 +245,7 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
         // NOTE: per your request, DO NOT store applicantId here.
         livestockId,                         // ✅ keep livestockId inside the doc
         applicantName: selectedApplicant.fullName || currentBeneficiary || '',
-        municipality,
+        municipality: selectedApplicant.municipality,
 
         livestockType: livestockType.trim(),
         details: {
@@ -203,23 +263,42 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
       await setDoc(doc(db, 'livestock', livestockId), livestockPayload);
 
       // — 2) Also save to "beneficiaries"
-      const address = municipality;
+      const address = selectedApplicant.municipality;
 
       const beneficiaryPayload = {
         name: selectedApplicant.fullName || currentBeneficiary || '',
         address,
-        sex: selectedApplicant.gender || null,
-        age: calculateAge(selectedApplicant.birthday) || null,   // ✅ computed from birthday
-        contactNumber: selectedApplicant.contact || '',
+        sex: applicantDetails?.gender || selectedApplicant.gender || null,
+        age: applicantDetails?.age || calculateAge(applicantDetails?.birthday) || calculateAge(selectedApplicant.birthday) || null,
+        contactNumber: applicantDetails?.contact || selectedApplicant.contact || '',
         dateDisperse: Timestamp.fromDate(dateDisperse),
         livestock: livestockType.trim(),
         livestockId,                     // ✅ link to livestock
+        card_uid: scannedUID || null,  // ✅ save the scanned UID as card_uid
         fieldInputBy: { uid, email: email || null },
         verificationStatus: 'pending',
         createdAt: serverTimestamp(),
       };
 
+      console.log('Beneficiary payload:', beneficiaryPayload);
+      console.log('Scanned UID:', scannedUID);
+
       await addDoc(collection(db, 'beneficiaries'), beneficiaryPayload);
+
+      // Remove the applicant from dispersalSchedules after successful submission
+      try {
+        console.log('Updating dispersal schedule:', selectedApplicant.id);
+        await setDoc(doc(db, 'dispersalSchedules', selectedApplicant.id), {
+          ...selectedApplicant,
+          status: 'completed',
+          completedAt: serverTimestamp(),
+          completedBy: uid
+        }, { merge: true });
+        console.log('Dispersal schedule updated successfully');
+      } catch (error) {
+        console.error('Error updating dispersal schedule status:', error);
+        // Don't fail the whole operation if this fails
+      }
 
       Alert.alert('Submitted for Verification');
       // Optional clear (keep selected applicant to allow multiple entries)
@@ -293,19 +372,17 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
             {/* Beneficiary Dropdown */}
             <DropdownListComponent
               label="Name of Beneficiary"
-              placeholder="Search and select a beneficiary"
+              placeholder={isLoadingApplicants ? "Loading scheduled applicants..." : "Select a beneficiary"}
               options={applicantResults}
               selectedValue={selectedApplicant?.id}
               onSelect={selectApplicant}
-              onSearch={searchApplicants}
-              loading={isSearchingApplicants}
-              searchable={true}
-              searchPlaceholder="Type a name to search..."
-              emptyMessage="No beneficiaries found. Try a different search term."
+              loading={isLoadingApplicants}
+              searchable={false}
+              emptyMessage="No scheduled applicants found for your municipality."
             />
             {selectedApplicant && (
-              <Text style={{ alignSelf: 'flex-start', marginTop: 6, color: colors.textLight }}>
-                Selected: {selectedApplicant.fullName} ({selectedApplicant.id})
+              <Text style={{ alignSelf: 'flex-start', marginTop: 6, color: colors.textLight, fontSize: 12 }}>
+                {selectedApplicant.barangay ? `${selectedApplicant.barangay}, ` : ""}{selectedApplicant.municipality || ""} • ID: {selectedApplicant.id}
               </Text>
             )}
 
@@ -318,6 +395,11 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
               onChangeText={setLivestockType}
               placeholderTextColor={colors.textLight}
             />
+            {livestockType && isLoadingScheduled && (
+              <Text style={{ alignSelf: 'flex-start', marginTop: -12, marginBottom: 8, color: colors.textLight, fontSize: 12 }}>
+                Pre-filled from schedule
+              </Text>
+            )}
 
             {/* Extra Livestock Details */}
             <Text style={[styles.inputLabel, { color: colors.primary }]}>Color</Text>
@@ -357,16 +439,6 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
               placeholderTextColor={colors.textLight}
             />
 
-            {/* Municipality */}
-            <Text style={[styles.inputLabel, { color: colors.primary }]}>Municipality</Text>
-            <TouchableOpacity
-              onPress={() => setShowMunicipalityPicker(true)}
-              style={[styles.input, { borderColor: colors.border, justifyContent: 'center' }]}
-            >
-              <Text style={{ color: municipality ? colors.text : colors.textLight }}>
-                {municipality || 'Select Municipality'}
-              </Text>
-            </TouchableOpacity>
 
             {/* Date Disperse (user-picked) */}
             <Text style={[styles.inputLabel, { color: colors.primary }]}>Date Disperse</Text>
@@ -430,31 +502,6 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
       </ScrollView>
 
 
-      {/* Municipality Picker */}
-      <Modal visible={showMunicipalityPicker} transparent animationType="slide">
-        <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, { backgroundColor: colors.white }]}>
-            <Text style={[styles.modalTitle, { color: colors.primary }]}>Select Municipality</Text>
-            <ScrollView style={styles.modalScrollView}>
-              {municipalities.map((m) => (
-                <TouchableOpacity
-                  key={m}
-                  style={[styles.modalItem, { borderBottomColor: colors.border }]}
-                  onPress={() => handleMunicipalitySelect(m)}
-                >
-                  <Text style={{ color: colors.text }}>{m}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: colors.accent }]}
-              onPress={() => setShowMunicipalityPicker(false)}
-            >
-              <Text style={styles.modalButtonText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }

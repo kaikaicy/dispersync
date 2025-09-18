@@ -92,23 +92,29 @@ export default function ListForDispersal() {
             );
           }
   
-          // build rows
-          const combined = schedules.map((sched) => {
-            const app = applicants.find((a) => a.id === sched.applicantId) || {};
-            return {
-              id: sched.id,
-              applicantId: sched.applicantId,
-              name: app.fullName || '(No name)',
-              barangay: app.barangay || '-',
-              municipality: app.municipality || '-',
-              address: app.address || '-',
-              livestock: app.livestock || '-',
-              contact: app.contact || 'No contact',
-              scheduledFor: sched.scheduledFor,
-              livestockSource: sched.livestockSource,
-              applicant: app,
-            };
-          });
+          // build rows - filter out completed schedules
+          console.log('All schedules:', schedules);
+          const completedSchedules = schedules.filter((sched) => sched.status === 'completed');
+          console.log('Completed schedules:', completedSchedules);
+          
+          const combined = schedules
+            .filter((sched) => sched.status !== 'completed') // Exclude completed schedules
+            .map((sched) => {
+              const app = applicants.find((a) => a.id === sched.applicantId) || {};
+              return {
+                id: sched.id,
+                applicantId: sched.applicantId,
+                name: app.fullName || '(No name)',
+                barangay: app.barangay || '-',
+                municipality: app.municipality || '-',
+                address: app.address || '-',
+                livestock: app.livestock || '-',
+                contact: app.contact || 'No contact',
+                scheduledFor: sched.scheduledFor,
+                livestockSource: sched.livestockSource,
+                applicant: app,
+              };
+            });
   
           setRows(combined);
           setLoading(false);
