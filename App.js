@@ -14,6 +14,7 @@ import Beneficiary from './Beneficiary';
 import Dispersal from './Dispersal';
 import INSPECT from './INSPECT'; // adjust path if needed
 import { DeviceProvider } from './src/context/DeviceContext';
+import Notifications from './Notifications';
 
 const Stack = createStackNavigator();
 
@@ -34,6 +35,15 @@ export default function App() {
         <Stack.Screen name="Beneficiary" component={Beneficiary} options={{ headerShown: false }} />
         <Stack.Screen name="Dispersal" component={Dispersal} options={{ headerShown: false }} />
         <Stack.Screen name="INSPECT" component={INSPECT} options={{ headerShown: false }} />
+        <Stack.Screen
+          name="Notifications"
+          component={Notifications}
+          options={{
+            headerShown: false,
+            presentation: 'transparentModal',
+            cardStyle: { backgroundColor: 'transparent' },
+          }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
     </DeviceProvider>
