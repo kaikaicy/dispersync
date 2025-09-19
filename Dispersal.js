@@ -117,7 +117,12 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
           return aTime - bTime;
         });
 
-        const dropdownOptions = schedules.map(schedule => {
+        // Filter out completed schedules
+        const pendingSchedules = schedules.filter(schedule => schedule.status !== 'completed');
+        console.log('All schedules:', schedules.length);
+        console.log('Pending schedules for dropdown:', pendingSchedules.length);
+
+        const dropdownOptions = pendingSchedules.map(schedule => {
           const mockApplicant = {
             id: schedule.id,
             applicantId: schedule.applicantId, // Add applicantId for fetching from applicants collection
@@ -288,12 +293,14 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
       // Remove the applicant from dispersalSchedules after successful submission
       try {
         console.log('Updating dispersal schedule:', selectedApplicant.id);
-        await setDoc(doc(db, 'dispersalSchedules', selectedApplicant.id), {
-          ...selectedApplicant,
+        const updateData = {
           status: 'completed',
           completedAt: serverTimestamp(),
           completedBy: uid
-        }, { merge: true });
+        };
+        console.log('Update data:', updateData);
+        
+        await setDoc(doc(db, 'dispersalSchedules', selectedApplicant.id), updateData, { merge: true });
         console.log('Dispersal schedule updated successfully');
       } catch (error) {
         console.error('Error updating dispersal schedule status:', error);

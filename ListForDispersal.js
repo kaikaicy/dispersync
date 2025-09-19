@@ -97,8 +97,10 @@ export default function ListForDispersal() {
           const completedSchedules = schedules.filter((sched) => sched.status === 'completed');
           console.log('Completed schedules:', completedSchedules);
           
-          const combined = schedules
-            .filter((sched) => sched.status !== 'completed') // Exclude completed schedules
+          const pendingSchedules = schedules.filter((sched) => sched.status !== 'completed');
+          console.log('Pending schedules:', pendingSchedules);
+          
+          const combined = pendingSchedules
             .map((sched) => {
               const app = applicants.find((a) => a.id === sched.applicantId) || {};
               return {
