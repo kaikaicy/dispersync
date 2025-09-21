@@ -26,10 +26,8 @@ export default function Cull({ onBackToTransactions }) {
   const [livestockType, setLivestockType] = useState('');
   const [cullDate, setCullDate] = useState('');
   const [cullReason, setCullReason] = useState('');
-  const [cullMethod, setCullMethod] = useState('');
   const [saleAmount, setSaleAmount] = useState('');
   const [saleDate, setSaleDate] = useState('');
-  const [replacementDetails, setReplacementDetails] = useState('');
 
   // Date picker states
   const [showCullDatePicker, setShowCullDatePicker] = useState(false);
@@ -56,18 +54,11 @@ export default function Cull({ onBackToTransactions }) {
 
   const replacementReasons = [
     { label: 'Offspring', key: 'offspring', icon: 'paw' },
-    { label: 'Died', key: 'died', icon: 'close-circle' },
-    { label: 'Disease', key: 'disease', icon: 'medical' },
-    { label: 'Poor Performance', key: 'poor_performance', icon: 'trending-down' },
-    { label: 'Other', key: 'other', icon: 'ellipsis-horizontal' },
+    { label: 'Philippine Crop Insurance Company', key: 'pcic', icon: 'shield-checkmark' },
+    { label: 'From Sale', key: 'from_sale', icon: 'cash' },
   ];
 
-  const cullMethods = [
-    { label: 'Slaughter', key: 'slaughter', icon: 'cut' },
-    { label: 'Euthanasia', key: 'euthanasia', icon: 'medical' },
-    { label: 'Natural Death', key: 'natural_death', icon: 'close-circle' },
-    { label: 'Other', key: 'other', icon: 'ellipsis-horizontal' },
-  ];
+  
 
   // Date handling functions
   const formatDate = (date) => {
@@ -116,10 +107,7 @@ export default function Cull({ onBackToTransactions }) {
       Alert.alert('Validation Error', 'Please enter the cull reason.');
       return;
     }
-    if (!cullMethod.trim()) {
-      Alert.alert('Validation Error', 'Please select the cull method.');
-      return;
-    }
+   
     
     if (selectedTab === 'Sold' && !selectedSoldOption) {
       Alert.alert('Validation Error', 'Please select who sold the livestock.');
@@ -265,17 +253,6 @@ export default function Cull({ onBackToTransactions }) {
               onChangeText={setCullReason}
             />
 
-            <Text style={[styles.inputLabel, { color: colors.primary }]}>Cull Method</Text>
-            <View style={styles.optionsGrid}>
-              {cullMethods.map((method) => 
-                renderOption(
-                  method, 
-                  cullMethod === method.key, 
-                  setCullMethod,
-                  16
-                )
-              )}
-            </View>
           </View>
 
           {/* Toggle Tabs */}
@@ -371,7 +348,7 @@ export default function Cull({ onBackToTransactions }) {
             <View style={styles.section}>
               <Text style={[styles.sectionTitle, { color: colors.primary }]}>Replacement Information</Text>
               <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>
-                Reason for replacement
+                Choose the replacement for the livestock
               </Text>
               <View style={styles.optionsGrid}>
                 {replacementReasons.map((option) => 
@@ -382,17 +359,6 @@ export default function Cull({ onBackToTransactions }) {
                   )
                 )}
               </View>
-
-              <Text style={[styles.inputLabel, { color: colors.primary }]}>Replacement Details</Text>
-              <TextInput
-                style={[styles.textArea, { borderColor: colors.border, color: colors.text }]}
-                placeholder="Enter additional details about the replacement"
-                placeholderTextColor={colors.textLight}
-                value={replacementDetails}
-                onChangeText={setReplacementDetails}
-                multiline
-                numberOfLines={4}
-              />
             </View>
           )}
 

@@ -8,19 +8,19 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
-  StatusBar   // ✅ add this
+  StatusBar,
+  Modal,
+  Alert
 } from "react-native";
-import Icon from "react-native-vector-icons/Feather"; // or your icon lib
+import Icon from "react-native-vector-icons/Feather";
 import logo from '../../assets/images/logo.png';
 
 import { auth, db } from "../config/firebase";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import {
   collection, query, where, getDocs, doc, getDoc
 } from "firebase/firestore";
 import { useDevice } from "../context/DeviceContext";
-
-// ... your other imports like styles, logo, etc.
 
 export default function LoginPage({ navigation, route }) {
   const [userId, setUserId] = useState("");
@@ -30,27 +30,76 @@ export default function LoginPage({ navigation, route }) {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   
+  // Forgot password states
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotUserId, setForgotUserId] = useState("");
+  const [forgotUserIdError, setForgotUserIdError] = useState("");
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+  
   // Get device IP from context
   const { baseUrl: deviceBaseUrl } = useDevice();
 
   // 🔎 Find email by the numeric User ID stored in Firestore
-  // Assumes each staff doc has a field: userId (string or numeric-like string, e.g. "12345")
-  // and is stored under collection "staff" (doc id = uid as set by your website API).
   const findEmailByUserId = async (numericId) => {
     const staffCol = collection(db, "staff");
-    const q = query(staffCol, where("userId", "==", numericId)); // exact match
+    const q = query(staffCol, where("userId", "==", numericId));
     const snap = await getDocs(q); 
     
     if (snap.empty) return null;
 
-    // If multiple, take the first (shouldn’t happen if userId is unique)
     const first = snap.docs[0];
     const data = first.data();
     console.log("email "+data.email);
     return { email: data.email, uid: data.uid };
   };
 
-  // ✅ Handle login: validate → lookup email → sign in → (optional) load profile → navigate
+  // Handle forgot password
+  const handleForgotPassword = async () => {
+    setForgotUserIdError("");
+    
+    if (!forgotUserId.trim()) {
+      setForgotUserIdError("Please enter your user ID");
+      return;
+    } else if (!/^\d+$/.test(forgotUserId)) {
+      setForgotUserIdError("User ID must contain only numbers");
+      return;
+    }
+
+    try {
+      setResetSubmitting(true);
+      
+      // Find email by user ID
+      const found = await findEmailByUserId(forgotUserId);
+      if (!found || !found.email) {
+        setForgotUserIdError("User ID not found");
+        return;
+      }
+
+      // Send password reset email
+      await sendPasswordResetEmail(auth, found.email);
+      
+      Alert.alert(
+        "Reset Email Sent",
+        `A password reset link has been sent to ${found.email}. Please check your email and follow the instructions to reset your password.`,
+        [
+          {
+            text: "OK",
+            onPress: () => {
+              setShowForgotPassword(false);
+              setForgotUserId("");
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error("Password reset error:", error);
+      setForgotUserIdError("Failed to send reset email. Please try again.");
+    } finally {
+      setResetSubmitting(false);
+    }
+  };
+
+  // Handle login: validate → lookup email → sign in → (optional) load profile → navigate
   const handleLogin = async () => {
     // keep your current validations
     let hasError = false;
@@ -210,19 +259,107 @@ export default function LoginPage({ navigation, route }) {
                 {submitting ? "Logging in..." : "Login"}
               </Text>
             </TouchableOpacity>
+
+            {/* Forgot Password Link */}
+            <TouchableOpacity
+              style={styles.forgotPasswordContainer}
+              onPress={() => setShowForgotPassword(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
+
+      {/* Forgot Password Modal */}
+      <Modal
+        visible={showForgotPassword}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowForgotPassword(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Reset Password</Text>
+              <TouchableOpacity
+                onPress={() => setShowForgotPassword(false)}
+                style={styles.closeButton}
+              >
+                <Icon name="x" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalDescription}>
+              Enter your User ID to receive a password reset link via email.
+            </Text>
+
+            <View style={styles.modalFormGroup}>
+              <View style={[styles.modalInputWrapper, forgotUserIdError && styles.inputError]}>
+                <Icon
+                  name="user"
+                  size={20}
+                  color={forgotUserIdError ? "#E74C3C" : "#459C8F"}
+                  style={styles.modalInputIcon}
+                />
+                <TextInput
+                  style={[styles.modalInput, forgotUserIdError && { color: "#E74C3C" }]}
+                  placeholder="User ID"
+                  value={forgotUserId}
+                  onChangeText={(text) => {
+                    if (/^\d*$/.test(text)) {
+                      setForgotUserId(text);
+                      setForgotUserIdError("");
+                    }
+                  }}
+                  keyboardType="numeric"
+                  placeholderTextColor={forgotUserIdError ? "#E74C3C" : "#b0b0b0"}
+                />
+              </View>
+              {forgotUserIdError ? (
+                <Text style={styles.modalErrorText}>{forgotUserIdError}</Text>
+              ) : null}
+            </View>
+
+            <View style={styles.modalButtonContainer}>
+              <TouchableOpacity
+                style={[styles.modalCancelButton]}
+                onPress={() => {
+                  setShowForgotPassword(false);
+                  setForgotUserId("");
+                  setForgotUserIdError("");
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalResetButton, resetSubmitting && { opacity: 0.6 }]}
+                onPress={handleForgotPassword}
+                activeOpacity={0.8}
+                disabled={resetSubmitting}
+              >
+                <Text style={styles.modalResetButtonText}>
+                  {resetSubmitting ? "Sending..." : "Send Reset Link"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
+
 // =====================
 // Styles
 // =====================
 const styles = StyleSheet.create({
   background: {
     flex: 1,
-    backgroundColor: '#E8F5F2', // Lighter, more subtle background
+    backgroundColor: '#E8F5F2',
   },
   scrollContainer: {
     flex: 1,
@@ -234,7 +371,7 @@ const styles = StyleSheet.create({
   cardContainer: {
     width: '100%',
     maxWidth: 420,
-    backgroundColor: '#FFFFFF', // Pure white for better contrast
+    backgroundColor: '#FFFFFF',
     borderRadius: 24,
     alignItems: 'center',
     padding: 32,
@@ -256,14 +393,14 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#2C3E50', // Darker, more readable text
+    color: '#2C3E50',
     textAlign: 'center',
     marginBottom: 8,
     letterSpacing: -0.5,
   },
   loginText: {
     fontSize: 16,
-    color: '#459C8F', // Teal Green accent
+    color: '#459C8F',
     textAlign: 'center',
     marginBottom: 32,
     fontWeight: '400',
@@ -299,16 +436,16 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#2C3E50', // Darker text for better readability
+    color: '#2C3E50',
     height: 60,
     fontWeight: '500',
   },
   inputError: {
-    borderColor: '#E74C3C', // Softer error red
-    backgroundColor: '#FEF2F2', // Light red background
+    borderColor: '#E74C3C',
+    backgroundColor: '#FEF2F2',
   },
   errorText: {
-    color: '#E74C3C', // Matching error red
+    color: '#E74C3C',
     fontSize: 13,
     marginTop: 4,
     marginLeft: 4,
@@ -322,7 +459,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   loginButton: {
-    backgroundColor: '#459C8F', // Teal Green
+    backgroundColor: '#459C8F',
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
@@ -349,9 +486,108 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   forgotPasswordText: {
-    color: '#459C8F', // Teal Green accent
+    color: '#459C8F',
     fontSize: 15,
     fontWeight: '500',
     textAlign: 'center',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#2C3E50',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalDescription: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  modalFormGroup: {
+    marginBottom: 24,
+  },
+  modalInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    height: 50,
+    borderWidth: 1,
+    borderColor: '#E8F5F2',
+  },
+  modalInputIcon: {
+    marginRight: 12,
+  },
+  modalInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#2C3E50',
+    fontWeight: '500',
+  },
+  modalErrorText: {
+    color: '#E74C3C',
+    fontSize: 13,
+    marginTop: 8,
+    fontWeight: '500',
+  },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E8F5F2',
+  },
+  modalCancelButtonText: {
+    color: '#666',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  modalResetButton: {
+    flex: 1,
+    backgroundColor: '#459C8F',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  modalResetButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 16,
   },
 }); 

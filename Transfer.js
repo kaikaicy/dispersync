@@ -15,12 +15,6 @@ const colors = {
   disabled: '#BDC3C7',
 };
 
-const purposeOptions = [
-  { label: 'Transfer of Ownership', key: 'ownership', icon: 'swap-horizontal' },
-  { label: 'Relocation', key: 'relocation', icon: 'navigate' },
-  { label: 'Others', key: 'others', icon: 'ellipsis-horizontal' },
-];
-
 export default function Transfer({ onBackToTransactions, navigation }) {
   const [beneficiaryInfo, setBeneficiaryInfo] = useState({
     fullName: '',
@@ -29,17 +23,7 @@ export default function Transfer({ onBackToTransactions, navigation }) {
     barangayMunicipality: '',
   });
 
-  const [animalDetails, setAnimalDetails] = useState({
-    quantity: '',
-    speciesItem: '',
-    breedType: '',
-    ageWeight: '',
-    sex: '',
-    remarks: '',
-  });
-
-  const [selectedPurpose, setSelectedPurpose] = useState('');
-  const [otherPurpose, setOtherPurpose] = useState('');
+  const [remarks, setRemarks] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [image, setImage] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -80,16 +64,6 @@ export default function Transfer({ onBackToTransactions, navigation }) {
     setShowSearchModal(false);
   };
 
-  const handlePurposeSelection = (key) => {
-    if (selectedPurpose === key) {
-      setSelectedPurpose('');
-      if (key === 'others') setOtherPurpose('');
-    } else {
-      setSelectedPurpose(key);
-      if (key !== 'others') setOtherPurpose('');
-    }
-  };
-
   // Documentation image helpers
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -115,21 +89,16 @@ export default function Transfer({ onBackToTransactions, navigation }) {
     if (!beneficiaryInfo.address.trim()) { Alert.alert('Validation Error', 'Please enter the address.'); return; }
     if (!beneficiaryInfo.contactNumber.trim()) { Alert.alert('Validation Error', 'Please enter the contact number.'); return; }
     if (!beneficiaryInfo.barangayMunicipality.trim()) { Alert.alert('Validation Error', 'Please enter the barangay/municipality.'); return; }
-    if (!animalDetails.quantity.trim()) { Alert.alert('Validation Error', 'Please enter the quantity.'); return; }
-    if (!animalDetails.speciesItem.trim()) { Alert.alert('Validation Error', 'Please enter the species/item.'); return; }
-    if (!selectedPurpose) { Alert.alert('Validation Error', 'Please select a purpose of transfer.'); return; }
-    if (selectedPurpose === 'others' && !otherPurpose.trim()) { Alert.alert('Validation Error', 'Please specify the other purpose.'); return; }
 
     setIsSubmitting(true);
     setTimeout(() => {
       setIsSubmitting(false);
       Alert.alert('Success', 'Transfer form submitted successfully!');
       setBeneficiaryInfo({ fullName: '', address: '', contactNumber: '', barangayMunicipality: '' });
-      setAnimalDetails({ quantity: '', speciesItem: '', breedType: '', ageWeight: '', sex: '', remarks: '' });
-      setSelectedPurpose('');
-      setOtherPurpose('');
+      setRemarks('');
       setSearchTerm('');
       setSelectedBeneficiary(null);
+      setImage(null);
       onBackToTransactions('Status');
     }, 1500);
   };
@@ -147,7 +116,7 @@ export default function Transfer({ onBackToTransactions, navigation }) {
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         <View style={styles.container}>
           <View style={styles.pageHeader}>
-            <Text style={styles.pageTitle}>🐄 Provincial Veterinarian's Office</Text>
+            <Text style={styles.pageTitle}>Provincial Veterinarian's Office</Text>
             <Text style={styles.pageSubtitle}>Transfer Form</Text>
           </View>
 
@@ -155,7 +124,7 @@ export default function Transfer({ onBackToTransactions, navigation }) {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Ionicons name="person" size={20} color={colors.primary} />
-              <Text style={styles.sectionTitle}>👤 Beneficiary Information</Text>
+              <Text style={styles.sectionTitle}>Beneficiary Information</Text>
             </View>
 
             <Text style={styles.inputLabel}>Full Name:</Text>
@@ -185,63 +154,18 @@ export default function Transfer({ onBackToTransactions, navigation }) {
 
             <Text style={styles.inputLabel}>Barangay/Municipality:</Text>
             <TextInput style={styles.input} placeholder="Enter barangay/municipality" placeholderTextColor={colors.textLight} value={beneficiaryInfo.barangayMunicipality} onChangeText={(text) => setBeneficiaryInfo(prev => ({ ...prev, barangayMunicipality: text }))} />
-          </View>
 
-          {/* Animal/Item Details Section */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="paw" size={20} color={colors.primary} />
-              <Text style={styles.sectionTitle}>📋 Animal / Item Details</Text>
-            </View>
-
-            <Text style={styles.inputLabel}>Quantity:</Text>
-            <TextInput style={styles.input} placeholder="Enter quantity" placeholderTextColor={colors.textLight} value={animalDetails.quantity} onChangeText={(text) => setAnimalDetails(prev => ({ ...prev, quantity: text }))} keyboardType="numeric" />
-
-            <Text style={styles.inputLabel}>Species/Item:</Text>
-            <TextInput style={styles.input} placeholder="Enter species or item" placeholderTextColor={colors.textLight} value={animalDetails.speciesItem} onChangeText={(text) => setAnimalDetails(prev => ({ ...prev, speciesItem: text }))} />
-
-            <Text style={styles.inputLabel}>Breed/Type:</Text>
-            <TextInput style={styles.input} placeholder="Enter breed or type" placeholderTextColor={colors.textLight} value={animalDetails.breedType} onChangeText={(text) => setAnimalDetails(prev => ({ ...prev, breedType: text }))} />
-
-            <Text style={styles.inputLabel}>Age/Weight:</Text>
-            <TextInput style={styles.input} placeholder="Enter age or weight" placeholderTextColor={colors.textLight} value={animalDetails.ageWeight} onChangeText={(text) => setAnimalDetails(prev => ({ ...prev, ageWeight: text }))} />
-
-            <Text style={styles.inputLabel}>Sex:</Text>
-            <TextInput style={styles.input} placeholder="Enter sex (M/F)" placeholderTextColor={colors.textLight} value={animalDetails.sex} onChangeText={(text) => setAnimalDetails(prev => ({ ...prev, sex: text }))} />
-
-            <Text style={styles.inputLabel}>Remarks:</Text>
-            <TextInput style={styles.remarksInput} placeholder="Enter remarks" placeholderTextColor={colors.textLight} value={animalDetails.remarks} onChangeText={(text) => setAnimalDetails(prev => ({ ...prev, remarks: text }))} multiline numberOfLines={3} />
-          </View>
-
-          {/* Purpose of Transfer Section */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Purpose of Transfer</Text>
-            </View>
-            <View style={styles.purposeOptionsGrid}>
-              {purposeOptions.map((opt) => {
-                const isSelected = selectedPurpose === opt.key;
-                return (
-                  <TouchableOpacity key={opt.key} style={[styles.purposeOptionCard, isSelected && styles.purposeOptionCardSelected]} onPress={() => handlePurposeSelection(opt.key)} activeOpacity={0.7}>
-                    <View style={styles.purposeOptionContent}>
-                      <View style={[styles.purposeIconContainer, isSelected && styles.purposeIconContainerSelected]}>
-                        <Ionicons name={opt.icon} size={18} color={isSelected ? colors.white : colors.textLight} />
-                      </View>
-                      <Text style={[styles.purposeOptionLabel, isSelected && styles.purposeOptionLabelSelected]}>{opt.label}</Text>
-                      <View style={[styles.purposeRadio, isSelected && styles.purposeRadioSelected]}>
-                        {isSelected && (<View style={styles.purposeRadioInner} />)}
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            {selectedPurpose === 'others' && (
-              <View style={{ marginTop: 16 }}>
-                <Text style={styles.inputLabel}>Others:</Text>
-                <TextInput style={styles.input} placeholder="Specify other purpose" placeholderTextColor={colors.textLight} value={otherPurpose} onChangeText={setOtherPurpose} />
-              </View>
-            )}
+            <Text style={styles.inputLabel}>Additional notes or observations</Text>
+            <TextInput
+              style={[styles.input, styles.remarksInput]}
+              placeholder="Enter remarks here..."
+              placeholderTextColor={colors.textLight}
+              value={remarks}
+              onChangeText={setRemarks}
+              multiline={true}
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
           </View>
 
           {/* Documentation Section */}
@@ -311,18 +235,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#25A18E', marginLeft: 8 },
   inputLabel: { fontSize: 14, color: '#666', fontWeight: '600', marginBottom: 8 },
   input: { backgroundColor: '#FFFFFF', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 16, fontSize: 15, borderWidth: 1, borderColor: '#E3F4EC', color: '#25A18E', minHeight: 48 },
-  remarksInput: { backgroundColor: '#FFFFFF', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, borderWidth: 1, borderColor: '#E3F4EC', color: '#25A18E', minHeight: 80, textAlignVertical: 'top' },
-  purposeOptionsGrid: { gap: 12, marginBottom: 16 },
-  purposeOptionCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E3F4EC' },
-  purposeOptionCardSelected: { borderColor: '#25A18E', backgroundColor: '#e6f4f1' },
-  purposeOptionContent: { flexDirection: 'row', alignItems: 'center' },
-  purposeIconContainer: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f8f9fa', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  purposeIconContainerSelected: { backgroundColor: '#25A18E' },
-  purposeOptionLabel: { fontSize: 15, color: '#25A18E', fontWeight: '500', flex: 1 },
-  purposeOptionLabelSelected: { color: '#25A18E', fontWeight: '600' },
-  purposeRadio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#25A18E', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  purposeRadioSelected: { backgroundColor: '#25A18E', borderColor: '#25A18E' },
-  purposeRadioInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' },
+  remarksInput: { minHeight: 80, textAlignVertical: 'top' },
   submitButton: { backgroundColor: '#4fd1c5', borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginBottom: 20, shadowColor: '#25A18E', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 3, elevation: 2 },
   submitButtonDisabled: { opacity: 0.7 },
   submitText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16, letterSpacing: 0.5 },
@@ -337,6 +250,3 @@ const styles = StyleSheet.create({
   photoBtn: { paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10, marginHorizontal: 8, elevation: 2 },
   photoBtnText: { color: '#fff', fontWeight: 'bold' },
 });
-
-
-

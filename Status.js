@@ -177,6 +177,18 @@ export default function Status({ onBackToTransactions, navigation }) {
     }
   };
 
+  const handleTransferPress = () => {
+    console.log('Transfer button pressed - navigating to Transfer screen');
+    // Use the MainScreen's navigation system instead of React Navigation
+    if (onBackToTransactions) {
+      // Navigate to Transfer screen while maintaining the MainScreen layout
+      onBackToTransactions('Transfer');
+    } else {
+      console.log('onBackToTransactions prop is not available');
+      Alert.alert('Navigation Error', 'Unable to navigate to Transfer screen. Please try again.');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
@@ -567,14 +579,24 @@ export default function Status({ onBackToTransactions, navigation }) {
                   <Text style={styles.cullingText}>Culling</Text>
                 </TouchableOpacity>
                 {selectedStatus.includes('with_calf') && (
-                  <TouchableOpacity 
-                    style={styles.redispersalButton} 
-                    activeOpacity={0.7}
-                    onPress={handleRedispersalPress}
-                  >
-                    <Ionicons name="share-outline" size={20} color={colors.primary} />
-                    <Text style={styles.redispersalText}>Re-dispersal</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity 
+                      style={styles.redispersalButton} 
+                      activeOpacity={0.7}
+                      onPress={handleRedispersalPress}
+                    >
+                      <Ionicons name="share-outline" size={20} color={colors.primary} />
+                      <Text style={styles.redispersalText}>Re-dispersal</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.transferButton} 
+                      activeOpacity={0.7}
+                      onPress={handleTransferPress}
+                    >
+                      <Ionicons name="swap-horizontal-outline" size={20} color="#25A18E" />
+                      <Text style={styles.transferText}>Transfer</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
           </View>
@@ -1047,6 +1069,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
   },
   cullingButton: {
     flexDirection: 'row',
@@ -1075,6 +1099,22 @@ const styles = StyleSheet.create({
     borderColor: '#25A18E',
   },
   redispersalText: {
+    color: '#25A18E',
+    fontWeight: '700',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  transferButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+  },
+  transferText: {
     color: '#25A18E',
     fontWeight: '700',
     fontSize: 16,
