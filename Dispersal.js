@@ -133,8 +133,7 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
             gender: schedule.gender || null,
             birthday: schedule.birthday || null,
             contact: schedule.contact || '',
-            livestock: schedule.livestock || '',
-            livestockSource: schedule.livestockSource || '' // ✅ Add livestockSource
+            livestock: schedule.livestock || ''
           };
           
           return {
@@ -266,8 +265,6 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
         livestockId,                         // ✅ keep livestockId inside the doc
         applicantName: selectedApplicant.fullName || currentBeneficiary || '',
         municipality: selectedApplicant.municipality,
-        barangay: applicantDetails?.barangay || selectedApplicant.barangay || null, // ✅ Save barangay
-        livestockSource: selectedApplicant.livestockSource || null, // ✅ Save livestock source
         inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector',
 
         livestockType: livestockType.trim(),
@@ -424,7 +421,6 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
             {selectedApplicant && (
               <Text style={{ alignSelf: 'flex-start', marginTop: 6, color: colors.textLight, fontSize: 12 }}>
                 {selectedApplicant.barangay ? `${selectedApplicant.barangay}, ` : ""}{selectedApplicant.municipality || ""} • ID: {selectedApplicant.id}
-                {selectedApplicant.livestockSource ? ` • Source: ${selectedApplicant.livestockSource}` : ""}
               </Text>
             )}
 

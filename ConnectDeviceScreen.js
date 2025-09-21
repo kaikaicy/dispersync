@@ -33,12 +33,13 @@ export default function ConnectDeviceScreen({ onContinue, navigation, onScannedU
   const [scanSuccess, setScanSuccess] = useState(false);
   const [lastUID, setLastUID] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [bypassMode, setBypassMode] = useState(false);
 
   const deviceListener = useRef(null);
 
-  // Create/replace listener whenever deviceBaseUrl changes
+  // Create/replace listener whenever deviceBaseUrl changes or bypass mode changes
   useEffect(() => {
-    if (!deviceBaseUrl) {
+    if (!deviceBaseUrl && !bypassMode) {
       setErrorMsg("No device URL. Please go back and scan for a device first.");
       // stop old listener if any
       if (deviceListener.current) {
@@ -49,7 +50,15 @@ export default function ConnectDeviceScreen({ onContinue, navigation, onScannedU
     }
 
     try {
-      deviceListener.current = createDeviceListener({ host: deviceBaseUrl, path: "/getData" });
+      // In bypass mode, use a dummy URL
+      const host = bypassMode ? "http://localhost" : deviceBaseUrl;
+      deviceListener.current = createDeviceListener({ host: host, path: "/getData" });
+      
+      // Enable dummy data in bypass mode
+      if (bypassMode && deviceListener.current) {
+        deviceListener.current.enableDummyData();
+      }
+      
       setErrorMsg(null);
     } catch (err) {
       console.error("Listener create error:", err);
@@ -64,7 +73,7 @@ export default function ConnectDeviceScreen({ onContinue, navigation, onScannedU
         deviceListener.current = null;
       }
     };
-  }, [deviceBaseUrl]);
+  }, [deviceBaseUrl, bypassMode]);
 
   // Subscribe to UID events when a listener exists
   useEffect(() => {
@@ -114,6 +123,22 @@ export default function ConnectDeviceScreen({ onContinue, navigation, onScannedU
     }
   };
 
+  // Bypass function - simulates a UID scan
+  const handleBypass = () => {
+    const dummyUID = "AA:BB:CC:DD:EE";
+    setLastUID(dummyUID);
+    setScanSuccess(true);
+    setScanning(false);
+    setErrorMsg(null);
+    
+    // Call the callbacks
+    if (onUIDScanned) {
+      onUIDScanned(dummyUID);
+    }
+    if (onScannedUID) {
+      onScannedUID(dummyUID);
+    }
+  };
 
   const handleStopListening = () => {
     if (deviceListener.current) {
@@ -262,43 +287,141 @@ export default function ConnectDeviceScreen({ onContinue, navigation, onScannedU
         </Text>
 
         {deviceBaseUrl ? (
-          <TouchableOpacity
-            onPress={handleScan}
-            style={{
-              backgroundColor: accentColor,
-              borderRadius: 24,
-              paddingVertical: 16,
-              paddingHorizontal: 48,
-              alignItems: "center",
-              shadowColor: accentColor,
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.2,
-              shadowRadius: 12,
-              elevation: 8,
-              marginBottom: 16,
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 18, letterSpacing: 1 }}>START LISTENING</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              onPress={handleScan}
+              style={{
+                backgroundColor: accentColor,
+                borderRadius: 24,
+                paddingVertical: 16,
+                paddingHorizontal: 48,
+                alignItems: "center",
+                shadowColor: accentColor,
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.2,
+                shadowRadius: 12,
+                elevation: 8,
+                marginBottom: 16,
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 18, letterSpacing: 1 }}>START LISTENING</Text>
+            </TouchableOpacity>
+            
+            {/* Bypass Mode Toggle */}
+            <TouchableOpacity
+              onPress={() => setBypassMode(!bypassMode)}
+              style={{
+                backgroundColor: bypassMode ? "#ff6b6b" : "#f8f9fa",
+                borderRadius: 20,
+                paddingVertical: 12,
+                paddingHorizontal: 24,
+                alignItems: "center",
+                borderWidth: 2,
+                borderColor: bypassMode ? "#ff6b6b" : "#dee2e6",
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ 
+                color: bypassMode ? "#fff" : "#666", 
+                fontWeight: "600", 
+                fontSize: 14 
+              }}>
+                {bypassMode ? "BYPASS MODE ON" : "Enable Bypass Mode"}
+              </Text>
+            </TouchableOpacity>
+            
+            {/* Bypass Button - only show when bypass mode is on */}
+            {bypassMode && (
+              <TouchableOpacity
+                onPress={handleBypass}
+                style={{
+                  backgroundColor: "#28a745",
+                  borderRadius: 20,
+                  paddingVertical: 12,
+                  paddingHorizontal: 32,
+                  alignItems: "center",
+                  shadowColor: "#28a745",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  elevation: 4,
+                  marginBottom: 16,
+                }}
+              >
+                <Text style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>
+                  SIMULATE UID SCAN
+                </Text>
+              </TouchableOpacity>
+            )}
+          </>
         ) : (
-          <TouchableOpacity
-            onPress={() => navigation && navigation.goBack()}
-            style={{
-              backgroundColor: accentColor,
-              borderRadius: 24,
-              paddingVertical: 16,
-              paddingHorizontal: 48,
-              alignItems: "center",
-              shadowColor: accentColor,
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.2,
-              shadowRadius: 12,
-              elevation: 8,
-              marginBottom: 16,
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 18, letterSpacing: 1 }}>Go Back</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              onPress={() => navigation && navigation.goBack()}
+              style={{
+                backgroundColor: accentColor,
+                borderRadius: 24,
+                paddingVertical: 16,
+                paddingHorizontal: 48,
+                alignItems: "center",
+                shadowColor: accentColor,
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.2,
+                shadowRadius: 12,
+                elevation: 8,
+                marginBottom: 16,
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 18, letterSpacing: 1 }}>Go Back</Text>
+            </TouchableOpacity>
+            
+            {/* Bypass Mode Toggle for no device */}
+            <TouchableOpacity
+              onPress={() => setBypassMode(!bypassMode)}
+              style={{
+                backgroundColor: bypassMode ? "#ff6b6b" : "#f8f9fa",
+                borderRadius: 20,
+                paddingVertical: 12,
+                paddingHorizontal: 24,
+                alignItems: "center",
+                borderWidth: 2,
+                borderColor: bypassMode ? "#ff6b6b" : "#dee2e6",
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ 
+                color: bypassMode ? "#fff" : "#666", 
+                fontWeight: "600", 
+                fontSize: 14 
+              }}>
+                {bypassMode ? "BYPASS MODE ON" : "Enable Bypass Mode"}
+              </Text>
+            </TouchableOpacity>
+            
+            {/* Bypass Button - only show when bypass mode is on */}
+            {bypassMode && (
+              <TouchableOpacity
+                onPress={handleBypass}
+                style={{
+                  backgroundColor: "#28a745",
+                  borderRadius: 20,
+                  paddingVertical: 12,
+                  paddingHorizontal: 32,
+                  alignItems: "center",
+                  shadowColor: "#28a745",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  elevation: 4,
+                  marginBottom: 16,
+                }}
+              >
+                <Text style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>
+                  SIMULATE UID SCAN
+                </Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
 
         {errorMsg && (
