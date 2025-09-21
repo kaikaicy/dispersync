@@ -244,6 +244,20 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
         console.log('No applicantId found in selectedApplicant');
       }
 
+      // Get inspector/staff details
+      let inspectorDetails = null;
+      try {
+        const staffRef = collection(db, 'staff');
+        const staffQuery = query(staffRef, where('uid', '==', uid));
+        const staffSnap = await getDocs(staffQuery);
+        if (!staffSnap.empty) {
+          inspectorDetails = staffSnap.docs[0].data();
+          console.log('Fetched inspector details:', inspectorDetails);
+        }
+      } catch (error) {
+        console.error('Error fetching inspector details:', error);
+      }
+
       // — 1) Save to "livestock"
       const livestockId = `${selectedApplicant.id}_${Date.now()}`; // doc id + field
       const livestockPayload = {
@@ -251,6 +265,7 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
         livestockId,                         // ✅ keep livestockId inside the doc
         applicantName: selectedApplicant.fullName || currentBeneficiary || '',
         municipality: selectedApplicant.municipality,
+        inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector',
 
         livestockType: livestockType.trim(),
         details: {
@@ -268,11 +283,26 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
       await setDoc(doc(db, 'livestock', livestockId), livestockPayload);
 
       // — 2) Also save to "beneficiaries"
-      const address = selectedApplicant.municipality;
+      // Concatenate full address from applicant details
+      const addressParts = [];
+      if (applicantDetails?.street) addressParts.push(applicantDetails.street);
+      if (applicantDetails?.purok) addressParts.push(applicantDetails.purok);
+      if (applicantDetails?.barangay) addressParts.push(applicantDetails.barangay);
+      if (applicantDetails?.municipality) addressParts.push(applicantDetails.municipality);
+      
+      // Fallback to selectedApplicant data if applicantDetails is not available
+      if (addressParts.length === 0) {
+        if (selectedApplicant?.address) addressParts.push(selectedApplicant.address);
+        if (selectedApplicant?.barangay) addressParts.push(selectedApplicant.barangay);
+        if (selectedApplicant?.municipality) addressParts.push(selectedApplicant.municipality);
+      }
+      
+      const fullAddress = addressParts.length > 0 ? addressParts.join(', ') : selectedApplicant.municipality || '';
 
       const beneficiaryPayload = {
         name: selectedApplicant.fullName || currentBeneficiary || '',
-        address,
+        address: fullAddress,
+        applicantId: selectedApplicant.applicantId || null, // ✅ Save applicant ID
         sex: applicantDetails?.gender || selectedApplicant.gender || null,
         age: applicantDetails?.age || calculateAge(applicantDetails?.birthday) || calculateAge(selectedApplicant.birthday) || null,
         contactNumber: applicantDetails?.contact || selectedApplicant.contact || '',
@@ -281,6 +311,7 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
         livestockId,                     // ✅ link to livestock
         card_uid: scannedUID || null,  // ✅ save the scanned UID as card_uid
         fieldInputBy: { uid, email: email || null },
+        inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector', // ✅ Save inspector name
         verificationStatus: 'pending',
         createdAt: serverTimestamp(),
       };

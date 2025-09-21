@@ -69,7 +69,7 @@ export function createDeviceListener(opts = {}) {
 
   // Optional dummy data for testing
   const DUMMY_UID = "AA:BB:CC:DD:EE";
-  let dummyDataEnabled = false;
+  let dummyDataEnabled = true;
 
   function _emit(uid) {
     const now = Date.now();
