@@ -653,16 +653,9 @@ export default function MainScreen({ navigation, route }) {
                   <Notifications
                     counts={notifCounts}
                     lastSeenCounts={lastSeenCounts}
-                    onMarkAllRead={async (currentCounts) => {
-                      try {
-                        const user = auth.currentUser;
-                        if (user) {
-                          await updateDoc(doc(db, 'staff', user.uid), { lastSeenCounts: currentCounts });
-                        }
-                        setLastSeenCounts(currentCounts);
-                      } catch (e) {
-                        console.error('Mark all read failed:', e);
-                      }
+                    onMarkAllRead={() => {
+                      // Immediately set unread count to 0 for instant UI feedback
+                      setUnreadCount(0);
                     }}
                     onGoTo={(target) => {
                       setShowNotifications(false);

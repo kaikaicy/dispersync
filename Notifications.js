@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from './src/config/firebase';
 import { collection, onSnapshot, orderBy, query, updateDoc, doc, deleteDoc, where, getDocs } from 'firebase/firestore';
 
-export default function Notifications({ onGoTo, onClose }) {
+export default function Notifications({ onGoTo, onClose, onMarkAllRead }) {
   const [items, setItems] = useState([]);
 
   useEffect(() => {
@@ -34,14 +34,21 @@ export default function Notifications({ onGoTo, onClose }) {
   const markAllRead = async () => {
     const user = auth.currentUser;
     if (!user) return;
-    const q = query(collection(db, 'mobileNotifications'), where('userId', '==', user.uid), where('read', '==', false));
-    // Best-effort: update sequentially to keep simple; can be batched if needed
-    const snap = await getDocs(q);
-    for (const d of snap.docs) {
-      await updateDoc(doc(db, 'mobileNotifications', d.id), { read: true, updatedAt: new Date() }); // <-- FIXED
+    
+    // Immediately clear the unread count in parent component
+    if (onMarkAllRead) {
+      onMarkAllRead();
     }
+    
     // Optimistically update local state so highlights disappear immediately
     setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+    
+    // Update Firestore in the background
+    const q = query(collection(db, 'mobileNotifications'), where('userId', '==', user.uid), where('read', '==', false));
+    const snap = await getDocs(q);
+    for (const d of snap.docs) {
+      await updateDoc(doc(db, 'mobileNotifications', d.id), { read: true, updatedAt: new Date() });
+    }
   };
 
   const markRead = async (id) => {
