@@ -28,13 +28,22 @@ const chunk = (arr, size = 10) =>
     arr.slice(i * size, i * size + size)
   );
 
-export default function ListForDispersal() {
+export default function ListForDispersal({ highlightScheduleId }) {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedApplicant, setSelectedApplicant] = useState(null);
 
   const [rows, setRows] = useState([]); // applicants approved for dispersal
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [highlightId, setHighlightId] = useState(null);
+
+  useEffect(() => {
+    if (highlightScheduleId) {
+      setHighlightId(highlightScheduleId);
+      const t = setTimeout(() => setHighlightId(null), 6000);
+      return () => clearTimeout(t);
+    }
+  }, [highlightScheduleId]);
 
   const [staffMunicipality, setStaffMunicipality] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -236,7 +245,10 @@ export default function ListForDispersal() {
             filtered.map((b, i) => (
               <TouchableOpacity
                 key={`${b.id}-${i}`}
-                style={styles.applicantCard}
+                style={[
+                  styles.applicantCard,
+                  b.id === highlightId ? { backgroundColor: '#FFF3CD', borderWidth: 1, borderColor: '#FFC107' } : null,
+                ]}
                 onPress={() => {
                   setSelectedApplicant(b);
                   setIsModalVisible(true);

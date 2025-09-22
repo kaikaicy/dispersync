@@ -120,6 +120,9 @@ export default function MainScreen({ navigation, route }) {
   const [showBeneficiaries, setShowBeneficiaries] = useState(false);
   const [showInspect, setShowInspect] = useState(false);
   const [showForDispersal, setShowForDispersal] = useState(false);
+  const [highlightInspectApplicantId, setHighlightInspectApplicantId] = useState(null);
+  const [highlightBeneficiaryApplicantId, setHighlightBeneficiaryApplicantId] = useState(null);
+  const [highlightDispersalScheduleId, setHighlightDispersalScheduleId] = useState(null);
   const [showTransactionScreen, setShowTransactionScreen] = useState(null);
   const [scannedUID, setScannedUID] = useState(null);
   const [monthlyDispersal, setMonthlyDispersal] = useState(Array(12).fill(0));
@@ -428,13 +431,13 @@ export default function MainScreen({ navigation, route }) {
     
     // Then check for other special screens
     if (showBeneficiaries) {
-      return <ListOfBeneficiaries />;
+      return <ListOfBeneficiaries highlightApplicantId={highlightBeneficiaryApplicantId} />;
     }
     if (showInspect) {
-      return <ListToInspect />;
+      return <ListToInspect highlightApplicantId={highlightInspectApplicantId} />;
     }
     if (showForDispersal) {
-      return <ListForDispersal />;
+      return <ListForDispersal highlightScheduleId={highlightDispersalScheduleId} />;
     }
     
     // Finally check the active tab
@@ -573,6 +576,9 @@ export default function MainScreen({ navigation, route }) {
       setShowInspect(false);
       setShowForDispersal(false);
       setShowTransactionScreen(null);
+      setHighlightInspectApplicantId(null);
+      setHighlightBeneficiaryApplicantId(null);
+      setHighlightDispersalScheduleId(null);
       if (section === 'beneficiaries') setShowBeneficiaries(true);
       else if (section === 'inspect') setShowInspect(true);
       else if (section === 'for_dispersal') setShowForDispersal(true);
@@ -588,6 +594,10 @@ export default function MainScreen({ navigation, route }) {
     setShowInspect(false);
     setShowForDispersal(false);
     setShowTransactionScreen(null);
+    // Manual navigation: ensure no highlight is shown
+    setHighlightInspectApplicantId(null);
+    setHighlightBeneficiaryApplicantId(null);
+    setHighlightDispersalScheduleId(null);
     if (choice === 'beneficiaries') {
       setShowBeneficiaries(true);
     } else if (choice === 'inspect') {
@@ -657,18 +667,24 @@ export default function MainScreen({ navigation, route }) {
                       // Immediately set unread count to 0 for instant UI feedback
                       setUnreadCount(0);
                     }}
-                    onGoTo={(target) => {
+                onGoTo={(target, params) => {
                       setShowNotifications(false);
                       setShowBeneficiaries(false);
                       setShowInspect(false);
                       setShowForDispersal(false);
                       setShowTransactionScreen(null);
+                  setHighlightInspectApplicantId(null);
+                  setHighlightBeneficiaryApplicantId(null);
+                  setHighlightDispersalScheduleId(null);
                       if (target === 'beneficiaries') {
                         setShowBeneficiaries(true);
+                    if (params?.refId) setHighlightBeneficiaryApplicantId(params.refId);
                       } else if (target === 'inspect') {
                         setShowInspect(true);
+                    if (params?.refId) setHighlightInspectApplicantId(params.refId);
                       } else if (target === 'for_dispersal') {
                         setShowForDispersal(true);
+                    if (params?.refId) setHighlightDispersalScheduleId(params.refId);
                       }
                     }}
                     onClose={() => setShowNotifications(false)}
@@ -690,6 +706,7 @@ export default function MainScreen({ navigation, route }) {
                 setShowNotifications(false);
                 setShowBeneficiaries(false);
                 setShowInspect(false);
+                setShowForDispersal(false);
                 setShowTransactionScreen(null);
                 setScannedUID(null);
               }}
@@ -705,6 +722,7 @@ export default function MainScreen({ navigation, route }) {
                   setShowNotifications(false);
                   setShowBeneficiaries(false);
                   setShowInspect(false);
+                  setShowForDispersal(false);
                   setShowTransactionScreen(null);
                   setScannedUID(null);
                 }}
@@ -720,6 +738,7 @@ export default function MainScreen({ navigation, route }) {
                 setShowNotifications(false);
                 setShowBeneficiaries(false);
                 setShowInspect(false);
+                setShowForDispersal(false);
                 setShowTransactionScreen(null);
                 setScannedUID(null);
               }}

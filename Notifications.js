@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from './src/config/firebase';
-import { collection, onSnapshot, orderBy, query, updateDoc, doc, deleteDoc, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, query, updateDoc, doc, deleteDoc, where, getDocs, writeBatch, serverTimestamp, getDoc } from 'firebase/firestore';
 
 export default function Notifications({ onGoTo, onClose, onMarkAllRead }) {
   const [items, setItems] = useState([]);
+  const locallyReadIdsRef = React.useRef({});
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -19,7 +20,10 @@ export default function Notifications({ onGoTo, onClose, onMarkAllRead }) {
       const rows = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((n) => !n.hiddenBy?.[user.uid]); // <-- filter out hidden
-      setItems(rows);
+
+      // Merge optimistic local read state to avoid flicker/countdown during bulk updates
+      const merged = rows.map((n) => (locallyReadIdsRef.current[n.id] ? { ...n, read: true } : n));
+      setItems(merged);
     });
     return () => unsub();
   }, []);
@@ -41,20 +45,90 @@ export default function Notifications({ onGoTo, onClose, onMarkAllRead }) {
     }
     
     // Optimistically update local state so highlights disappear immediately
+    const idsToMark = items.filter((n) => !n.read).map((n) => n.id);
+    if (idsToMark.length === 0) return;
     setItems((prev) => prev.map((n) => ({ ...n, read: true })));
-    
-    // Update Firestore in the background
-    const q = query(collection(db, 'mobileNotifications'), where('userId', '==', user.uid), where('read', '==', false));
+    // Track locally read ids to merge with snapshot data while backend updates
+    const nextMap = { ...locallyReadIdsRef.current };
+    idsToMark.forEach((id) => { nextMap[id] = true; });
+    locallyReadIdsRef.current = nextMap;
+
+    // Batch update Firestore to minimize intermediate snapshots
+    const q = query(
+      collection(db, 'mobileNotifications'),
+      where('userId', '==', user.uid),
+      where('read', '==', false)
+    );
     const snap = await getDocs(q);
-    for (const d of snap.docs) {
-      await updateDoc(doc(db, 'mobileNotifications', d.id), { read: true, updatedAt: new Date() });
+    if (!snap.empty) {
+      const batch = writeBatch(db);
+      snap.docs.forEach((d) => {
+        batch.update(doc(db, 'mobileNotifications', d.id), { read: true, updatedAt: serverTimestamp() });
+      });
+      await batch.commit();
     }
+    // Backend is now consistent; clear local overrides
+    locallyReadIdsRef.current = {};
+  };
+
+  const deleteAll = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    
+    if (items.length === 0) return;
+
+    // Show confirmation alert
+    Alert.alert(
+      "Delete All Notifications",
+      "Are you sure you want to delete all notifications? This action cannot be undone.",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Delete All",
+          style: "destructive",
+          onPress: async () => {
+            // Optimistically clear all items from UI immediately
+            setItems([]);
+            
+            try {
+              // Get all notifications for this user
+              const q = query(
+                collection(db, 'mobileNotifications'),
+                where('userId', '==', user.uid)
+              );
+              const snap = await getDocs(q);
+              
+              if (!snap.empty) {
+                // Batch update to mark all as hidden for this user
+                const batch = writeBatch(db);
+                snap.docs.forEach((d) => {
+                  batch.update(doc(db, 'mobileNotifications', d.id), {
+                    [`hiddenBy.${user.uid}`]: true,
+                    updatedAt: serverTimestamp()
+                  });
+                });
+                await batch.commit();
+              }
+            } catch (error) {
+              console.error('Error deleting all notifications:', error);
+              // If there's an error, we might want to refresh the data
+              // The onSnapshot listener will automatically restore the data
+            }
+          }
+        }
+      ]
+    );
   };
 
   const markRead = async (id) => {
     // Optimistically mark as read but keep in list
     setItems((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
-    await updateDoc(doc(db, 'mobileNotifications', id), { read: true, updatedAt: new Date() });
+    // Ensure snapshot does not momentarily revert the read state
+    locallyReadIdsRef.current = { ...locallyReadIdsRef.current, [id]: true };
+    await updateDoc(doc(db, 'mobileNotifications', id), { read: true, updatedAt: serverTimestamp() });
   };
 
   const remove = async (id) => {
@@ -103,9 +177,14 @@ export default function Notifications({ onGoTo, onClose, onMarkAllRead }) {
             </View>
           )}
         </View>
-        <TouchableOpacity onPress={markAllRead} style={{ padding: 6 }}>
-          <Text style={{ color: '#25A18E', fontWeight: '600' }}>Mark all as read</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity onPress={markAllRead} style={{ padding: 6, marginRight: 8 }}>
+            <Text style={{ color: '#25A18E', fontWeight: '600' }}>Mark all as read</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={deleteAll} style={{ padding: 6 }}>
+            <Ionicons name="trash-outline" size={20} color="#E53935" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12 }}>
@@ -145,6 +224,42 @@ function timeAgo(ts) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+function formatEventTime(ts) {
+  if (!ts) return '';
+  const date = ts?.toDate ? ts.toDate() : (ts instanceof Date ? ts : new Date(ts));
+  
+  // Format: MM/DD/YYYY, H:MM:SS AM/PM
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  const year = date.getFullYear();
+  
+  let hours = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const seconds = date.getSeconds().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  
+  return `${month}/${day}/${year}, ${hours}:${minutes}:${seconds} ${ampm}`;
+}
+
+// Short format: MM/DD/YY, hh:mm:ssam/pm (lowercase am/pm, no space)
+function formatEventTimeShort(ts) {
+  if (!ts) return '';
+  const date = ts?.toDate ? ts.toDate() : (ts instanceof Date ? ts : new Date(ts));
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  const year2 = (date.getFullYear() % 100).toString().padStart(2, '0');
+  let hours = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const seconds = date.getSeconds().toString().padStart(2, '0');
+  const isPm = hours >= 12;
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const hh = hours.toString().padStart(2, '0');
+  return `${month}/${day}/${year2}, ${hh}:${minutes}:${seconds}${isPm ? 'pm' : 'am'}`;
+}
+
 function NotificationItem({ n, onGoTo, onMarkRead, onDelete }) {
   const icon = n.type === 'inspect' ? 'clipboard-outline'
     : n.type === 'beneficiaries' ? 'people-outline'
@@ -154,15 +269,77 @@ function NotificationItem({ n, onGoTo, onMarkRead, onDelete }) {
     : n.type === 'beneficiaries' ? 'beneficiaries'
     : n.type === 'inspect_rejected' ? 'inspect'
     : 'for_dispersal';
+
+  const handleOpen = async () => {
+    try {
+      // For inspection notifications, ensure applicant still needs action
+      if ((n.type === 'inspect' || n.type === 'inspect_rejected') && n.refId) {
+        const applicantSnap = await getDoc(doc(db, 'applicants', n.refId));
+        if (applicantSnap.exists()) {
+          const data = applicantSnap.data();
+          const statusRaw = data.inspectionStatus || data.status || data.inspection || '';
+          const status = String(statusRaw).toLowerCase();
+          if (status === 'completed' || status === 'approved') {
+            if (!n.read) onMarkRead?.();
+            Alert.alert('Already inspected', 'This item has already been inspected.');
+            return;
+          }
+        }
+      }
+      if (!n.read) onMarkRead?.();
+      onGoTo?.(target, { refId: n.refId, notifId: n.id, type: n.type });
+    } catch (err) {
+      console.error('Failed to open notification target:', err);
+      // Fallback: still prevent navigation if uncertain, but mark read to avoid re-alert loops
+      if (!n.read) onMarkRead?.();
+      Alert.alert('Unavailable', 'Unable to open this item at the moment.');
+    }
+  };
+
   return (
     <View style={[styles.itemRow, !n.read ? styles.itemRowUnread : styles.itemRowRead]}>
       <View style={styles.itemIconWrap}>
         <Ionicons name={icon} size={20} color="#25A18E" />
       </View>
       <View style={{ flex: 1 }}>
-        <TouchableOpacity onPress={() => { if (!n.read) onMarkRead(); onGoTo?.(target); }} activeOpacity={0.8}>
+        <TouchableOpacity onPress={handleOpen} activeOpacity={0.8}>
           <Text style={[styles.itemTitle, !n.read ? styles.itemTitleUnread : null]}>{n.title}</Text>
-          {!!n.message && <Text style={[styles.itemMessage, !n.read ? styles.itemMessageUnread : null]}>{n.message}</Text>}
+          {/* Primary message: "<name> from <barangay, municipality> needs inspection" */}
+          {(() => {
+            const locationParts = [n.barangay, n.municipality || n.city || n.town || n.municipal].filter(Boolean);
+            const location = locationParts.length > 0 ? ` from ${locationParts.join(', ')}` : '';
+            const base = n.message || '';
+            let composed = base;
+            if (base && location) {
+              // Try to inject location before the trailing action, defaults to appending if not matched
+              const needsIdx = base.toLowerCase().lastIndexOf(' needs');
+              composed = needsIdx > 0
+                ? `${base.slice(0, needsIdx)}${location}${base.slice(needsIdx)}`
+                : `${base}${location}`;
+            }
+            return (
+              <Text style={[styles.itemMessage, !n.read ? styles.itemMessageUnread : null]}>
+                {composed || (location ? `From${location}` : '')}
+              </Text>
+            );
+          })()}
+
+          {/* Location line: Barangay, Municipality */}
+          {(() => {
+            const locParts = [n.barangay, n.municipality || n.city || n.town || n.municipal].filter(Boolean);
+            if (locParts.length === 0) return null;
+            return (
+              <View style={styles.eventDetails}>
+                <Text style={styles.eventDetailText}>{locParts.join(', ')}</Text>
+              </View>
+            );
+          })()}
+
+          {/* Compact event time on its own line */}
+          <View style={styles.eventDetails}>
+            <Text style={styles.eventDetailText}>{formatEventTimeShort(n.eventTime || n.createdAt)}</Text>
+          </View>
+
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
             {!n.read && <View style={styles.unreadDot} />}
             <Text style={styles.itemTime}>{timeAgo(n.createdAt)}</Text>
@@ -250,6 +427,15 @@ const styles = StyleSheet.create({
   itemMessageUnread: {
     fontWeight: '600',
   },
+  eventDetails: {
+    marginTop: 4,
+  },
+  eventDetailText: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 1,
+    fontWeight: '500',
+  },
   itemTime: {
     color: '#666',
     fontSize: 11,
@@ -302,5 +488,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
-

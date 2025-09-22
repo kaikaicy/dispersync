@@ -23,7 +23,7 @@ import { onAuthStateChanged } from 'firebase/auth';
     "Proper fencing for safety"
   ];
 
-export default function ListToInspect() {
+export default function ListToInspect({ highlightApplicantId }) {
   const [showInspect, setShowInspect] = useState(false);
   const [image, setImage] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -36,6 +36,15 @@ export default function ListToInspect() {
   });
   const [eligibility, setEligibility] = useState(Array(eligibilityCriteria.length).fill(false));
   const [site, setSite] = useState(Array(siteSuitability.length).fill(false));
+  const [highlightId, setHighlightId] = useState(null);
+
+  useEffect(() => {
+    if (highlightApplicantId) {
+      setHighlightId(highlightApplicantId);
+      const t = setTimeout(() => setHighlightId(null), 6000);
+      return () => clearTimeout(t);
+    }
+  }, [highlightApplicantId]);
 
   // Color constants - matching Cull.js exactly
   const colors = {
@@ -281,6 +290,9 @@ export default function ListToInspect() {
           lastInspectionDate: new Date()
         });
 
+        // Remove inspected applicant from local list immediately
+        setApplicants((prev) => prev.filter((a) => a.id !== selectedApplicant.id));
+
         Alert.alert('Success', 'Inspection completed successfully!');
         handleBackToList();
       }
@@ -367,7 +379,10 @@ export default function ListToInspect() {
             {applicants.map((applicant, index) => (
               <TouchableOpacity
                 key={applicant.id}
-                style={styles.applicantCard}
+                style={[
+                  styles.applicantCard,
+                  applicant.id === highlightId ? { backgroundColor: '#FFF3CD', borderWidth: 1, borderColor: '#FFC107' } : null,
+                ]}
                 onPress={() => handleApplicantSelect(applicant)}
                 activeOpacity={0.7}
               >
