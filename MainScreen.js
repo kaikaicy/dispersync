@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Image, Animated, Easing, Modal } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialIcons, FontAwesome } from '@expo/vector-icons';
@@ -15,7 +15,15 @@ import ListOfBeneficiaries from './ListOfBeneficiaries';
 import ListToInspect from './ListToInspect';
 import ListForDispersal from './ListForDispersal';
 import Transfer from './Transfer';
+import Notifications from './Notifications';
 import { useDevice } from './src/context/DeviceContext';
+import { auth, db } from './src/config/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
+import { collection, query, where, onSnapshot, getDocs, getDoc, doc, documentId, updateDoc } from 'firebase/firestore';
+import { startNotificationsSync } from './src/services/NotificationsService';
+import { LineChart } from 'react-native-chart-kit';
+import { Dimensions } from 'react-native';
 
 // Import logo images
 const leftLogo = require('./assets/images/logoleft.png');
@@ -103,12 +111,25 @@ export function ScanningCircle({ duration = 2000, size = 140, strokeWidth = 10, 
 export default function MainScreen({ navigation, route }) {
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [notifModalVisible, setNotifModalVisible] = useState(false);
+  const [notifCounts, setNotifCounts] = useState({ beneficiaries: 0, inspect: 0, dispersal: 0 });
+  const [lastSeenCounts, setLastSeenCounts] = useState({ beneficiaries: 0, inspect: 0, dispersal: 0 });
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [staffRole, setStaffRole] = useState(null);
+  const [staffMunicipality, setStaffMunicipality] = useState(null);
   const [showBeneficiaries, setShowBeneficiaries] = useState(false);
   const [showInspect, setShowInspect] = useState(false);
   const [showForDispersal, setShowForDispersal] = useState(false);
+  const [highlightInspectApplicantId, setHighlightInspectApplicantId] = useState(null);
+  const [highlightBeneficiaryApplicantId, setHighlightBeneficiaryApplicantId] = useState(null);
+  const [highlightDispersalScheduleId, setHighlightDispersalScheduleId] = useState(null);
   const [showTransactionScreen, setShowTransactionScreen] = useState(null);
   const [scannedUID, setScannedUID] = useState(null);
-  
+  const [monthlyDispersal, setMonthlyDispersal] = useState(Array(12).fill(0));
+  const [pendingTransfers, setPendingTransfers] = useState(0);
+  const [totalDispersed, setTotalDispersed] = useState(0);
+  const [staffName, setStaffName] = useState('');
+
   // Get device IP from context
   const { baseUrl: deviceBaseUrl } = useDevice();
   
@@ -118,6 +139,241 @@ export default function MainScreen({ navigation, route }) {
       console.log('MainScreen received device IP from context:', deviceBaseUrl);
     }
   }, [deviceBaseUrl]);
+
+  // Load staff municipality from auth user and last seen counts
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      try {
+        if (!user) {
+          setStaffMunicipality(null);
+          setLastSeenCounts({ beneficiaries: 0, inspect: 0, dispersal: 0 });
+          setUnreadCount(0);
+          return;
+        }
+        const staffSnap = await getDoc(doc(db, 'staff', user.uid));
+        const data = staffSnap.exists() ? staffSnap.data() : {};
+        const muni = data.municipality || data.Municipality || data?.location?.municipality || null;
+        setStaffMunicipality(typeof muni === 'string' ? muni : null);
+        setStaffRole(data?.role || data?.userRole || null);
+        const seen = data?.lastSeenCounts;
+        if (seen && typeof seen === 'object') {
+          setLastSeenCounts({
+            beneficiaries: Number(seen.beneficiaries) || 0,
+            inspect: Number(seen.inspect) || 0,
+            dispersal: Number(seen.dispersal) || 0,
+          });
+        }
+        // Subscribe to unread notifications count
+        try {
+          const unsubUnread = onSnapshot(
+            query(collection(db, 'mobileNotifications'), where('userId', '==', user.uid), where('read', '==', false)),
+            (snap) => setUnreadCount(snap.size),
+            (err) => console.error('Unread notifications listener error:', err)
+          );
+          return () => unsubUnread();
+        } catch (e) {
+          console.error('Failed to subscribe to unread notifications:', e);
+        }
+      } catch (e) {
+        console.error('Failed to load staff municipality:', e);
+        setStaffMunicipality(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Fetch staff name
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setStaffName('');
+        return;
+      }
+      const staffSnap = await getDoc(doc(db, 'staff', user.uid));
+      const data = staffSnap.exists() ? staffSnap.data() : {};
+      setStaffName(data?.name || data?.fullName || user.displayName || '');
+    });
+    return () => unsub();
+  }, []);
+
+  // Helper to update live counts for each category
+  useEffect(() => {
+    // Start background sync to create per-item notifications
+    let stopSync;
+    const user = auth.currentUser;
+    if (user) {
+      stopSync = startNotificationsSync(user.uid, staffMunicipality, staffRole);
+    }
+
+    // set up listeners for three sources
+    const unsubscribers = [];
+
+    // Applicants needing inspection
+    try {
+      const unsubApplicants = onSnapshot(
+        collection(db, 'applicants'),
+        (snap) => {
+          let count = 0;
+          snap.forEach((d) => {
+            const data = d.data();
+            const status = data.inspectionStatus || data.status || data.inspection || 'pending';
+            const muni = data.municipality || data.municipalityName || data.area || '';
+            const needsInspection = status === 'pending' || status === 'not started' || status === 'pending inspection' || status === '';
+            if (!needsInspection) return;
+            if (!staffMunicipality) {
+              count += 1;
+            } else if (String(muni).toLowerCase().trim() === String(staffMunicipality).toLowerCase().trim()) {
+              count += 1;
+            }
+          });
+          setNotifCounts((prev) => ({ ...prev, inspect: count }));
+        },
+        (err) => console.error('onSnapshot applicants error:', err)
+      );
+      unsubscribers.push(unsubApplicants);
+    } catch (e) {
+      console.error('Applicants listener setup failed:', e);
+    }
+
+    // Approved beneficiaries (inspections.status == 'approved'), dedup by applicant and filter by municipality
+    try {
+      const unsubBeneficiaries = onSnapshot(
+        query(collection(db, 'inspections'), where('status', '==', 'approved')),
+        async (snap) => {
+          try {
+            const inspections = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            const applicantIds = Array.from(new Set(inspections.map((r) => r.applicantId).filter(Boolean)));
+            if (applicantIds.length === 0) {
+              setNotifCounts((prev) => ({ ...prev, beneficiaries: 0 }));
+              return;
+            }
+            // batch fetch applicants
+            const applicantsMap = {};
+            for (let i = 0; i < applicantIds.length; i += 10) {
+              const batch = applicantIds.slice(i, i + 10);
+              const qs = await getDocs(query(collection(db, 'applicants'), where(documentId(), 'in', batch)));
+              qs.forEach((docSnap) => {
+                applicantsMap[docSnap.id] = docSnap.data();
+              });
+            }
+            // dedup by applicant, apply muni filter
+            const seen = new Set();
+            let count = 0;
+            for (const insp of inspections) {
+              const appId = insp.applicantId;
+              if (!appId || seen.has(appId)) continue;
+              seen.add(appId);
+              const app = applicantsMap[appId] || {};
+              const muni = app.municipality || '-';
+              if (!staffMunicipality || String(muni).toLowerCase().trim() === String(staffMunicipality).toLowerCase().trim()) {
+                count += 1;
+              }
+            }
+            setNotifCounts((prev) => ({ ...prev, beneficiaries: count }));
+          } catch (err) {
+            console.error('Beneficiaries count load failed:', err);
+          }
+        },
+        (err) => console.error('onSnapshot inspections error:', err)
+      );
+      unsubscribers.push(unsubBeneficiaries);
+    } catch (e) {
+      console.error('Beneficiaries listener setup failed:', e);
+    }
+
+    // Dispersal schedules (status !== 'completed'), join applicants to filter by municipality
+    try {
+      const unsubDispersal = onSnapshot(
+        collection(db, 'dispersalSchedules'),
+        async (snap) => {
+          try {
+            const schedules = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            const filteredSched = schedules.filter((s) => s.status !== 'completed');
+            const applicantIds = Array.from(new Set(filteredSched.map((r) => r.applicantId).filter(Boolean)));
+            if (applicantIds.length === 0) {
+              setNotifCounts((prev) => ({ ...prev, dispersal: 0 }));
+              return;
+            }
+            const applicantsMap = {};
+            for (let i = 0; i < applicantIds.length; i += 10) {
+              const batch = applicantIds.slice(i, i + 10);
+              const qs = await getDocs(query(collection(db, 'applicants'), where(documentId(), 'in', batch)));
+              qs.forEach((docSnap) => {
+                applicantsMap[docSnap.id] = docSnap.data();
+              });
+            }
+            let count = 0;
+            for (const sched of filteredSched) {
+              const app = applicantsMap[sched.applicantId] || {};
+              const muni = app.municipality || '-';
+              if (!staffMunicipality || String(muni).toLowerCase().trim() === String(staffMunicipality).toLowerCase().trim()) {
+                count += 1;
+              }
+            }
+            setNotifCounts((prev) => ({ ...prev, dispersal: count }));
+          } catch (err) {
+            console.error('Dispersal count load failed:', err);
+          }
+        },
+        (err) => console.error('onSnapshot dispersalSchedules error:', err)
+      );
+      unsubscribers.push(unsubDispersal);
+    } catch (e) {
+      console.error('Dispersal listener setup failed:', e);
+    }
+
+    return () => {
+      unsubscribers.forEach((u) => {
+        try { u && u(); } catch (_) {}
+      });
+      try { stopSync && stopSync(); } catch (_) {}
+    };
+  }, [staffMunicipality, staffRole]);
+
+  // Fetch monthly dispersal trends and other stats
+  useEffect(() => {
+    // Monthly Dispersal Trends
+    const unsub = onSnapshot(
+      collection(db, 'dispersalSchedules'),
+      async (snap) => {
+        const now = new Date();
+        const months = Array(12).fill(0);
+        let total = 0;
+        snap.forEach(docSnap => {
+          const data = docSnap.data();
+          if (!data.date) return;
+          const date = new Date(data.date.seconds ? data.date.seconds * 1000 : data.date);
+          if (date.getFullYear() === now.getFullYear()) {
+            months[date.getMonth()] += 1;
+            total += 1;
+          }
+        });
+        setMonthlyDispersal(months);
+        setTotalDispersed(total);
+      }
+    );
+    // Pending Transfers
+    const unsubTransfers = onSnapshot(
+      query(collection(db, 'transfers'), where('status', '==', 'pending')),
+      (snap) => setPendingTransfers(snap.size)
+    );
+    return () => {
+      unsub();
+      unsubTransfers();
+    };
+  }, []);
+
+  // New Dashboard Header
+    const renderDashboardHeader = () => (
+    <View style={styles.dashboardHeaderContainer}>
+      <View>
+        <Text style={styles.dashboardHeaderTitle}>Dashboard</Text>
+        <Text style={styles.dashboardHeaderSubtitle}>
+          Welcome back, {staffName || 'Field Staff'}
+        </Text>
+      </View>
+    </View>
+  );
 
   // Helper to render main content
   const renderMainContent = () => {
@@ -129,8 +385,7 @@ export default function MainScreen({ navigation, route }) {
         scannedUID={scannedUID}
       />;
     } else if (showTransactionScreen === 'Cull') {
-      return <Cull navigation={navigation} scannedUID={scannedUID} onBackToTransactions={(screen) => {
-        if (screen === 'Status') {
+        return <Cull navigation={navigation} scannedUID={scannedUID} onBackToTransactions={(screen) => {        if (screen === 'Status') {
           setShowTransactionScreen('Status');
         } else {
           setShowTransactionScreen('Transaction');
@@ -175,13 +430,13 @@ export default function MainScreen({ navigation, route }) {
     
     // Then check for other special screens
     if (showBeneficiaries) {
-      return <ListOfBeneficiaries />;
+      return <ListOfBeneficiaries highlightApplicantId={highlightBeneficiaryApplicantId} />;
     }
     if (showInspect) {
-      return <ListToInspect />;
+      return <ListToInspect highlightApplicantId={highlightInspectApplicantId} />;
     }
     if (showForDispersal) {
-      return <ListForDispersal />;
+      return <ListForDispersal highlightScheduleId={highlightDispersalScheduleId} />;
     }
     
     // Finally check the active tab
@@ -205,66 +460,143 @@ export default function MainScreen({ navigation, route }) {
       // Dashboard content (default)
       return (
         <>
-          <Text style={styles.sectionTitle}>Summary of Details</Text>
-          <View style={styles.divider} />
-          <View style={styles.statRow}>
-            <View style={styles.statCard}>
-              <View style={[styles.statIconCircle, { backgroundColor: '#B5D7AC' }]}>
-                <Ionicons name="business" size={20} color="#459C8F" />
+          {renderDashboardHeader()}
+          {/* Summary Cards - 2x2 grid, more formal, smaller icons/text, no "Summary of Details" */}
+          <View style={styles.summaryGrid}>
+            <View style={styles.summaryGridRow}>
+              {/* Beneficiaries in Municipality */}
+              <View style={styles.summaryCard}>
+                <View style={[styles.summaryIconCircle, { backgroundColor: '#E3F4EC' }]}>
+                  <Ionicons name="people-outline" size={22} color="#25A18E" />
+                </View>
+                <Text style={styles.summaryNumber}>{notifCounts.beneficiaries}</Text>
+                <Text style={styles.summaryLabel}>Beneficiaries{'\n'}in Municipality</Text>
               </View>
-              <Text style={styles.statNumber}>15</Text>
-              <Text style={styles.statLabel}>Livestock Assigned to Municipality</Text>
+              {/* Applicants Needing Inspection */}
+              <View style={styles.summaryCard}>
+                <View style={[styles.summaryIconCircle, { backgroundColor: '#F5F9F8' }]}>
+                  <Ionicons name="clipboard-outline" size={22} color="#25A18E" />
+                </View>
+                <Text style={styles.summaryNumber}>{notifCounts.inspect}</Text>
+                <Text style={styles.summaryLabel}>Applicants Needing{'\n'}Inspection</Text>
+              </View>
             </View>
-            <View style={styles.statCard}>
-              <View style={[styles.statIconCircle, { backgroundColor: '#A7D1C7' }]}>
-                <Ionicons name="medkit" size={20} color="#49988E" />
+            <View style={styles.summaryGridRow}>
+              {/* Approved Beneficiaries */}
+              <View style={styles.summaryCard}>
+                <View style={[styles.summaryIconCircle, { backgroundColor: '#E3F4EC' }]}>
+                  <Ionicons name="checkmark-done-outline" size={22} color="#25A18E" />
+                </View>
+                <Text style={styles.summaryNumber}>{notifCounts.beneficiaries}</Text>
+                <Text style={styles.summaryLabel}>Approved{'\n'}Beneficiaries</Text>
               </View>
-              <Text style={styles.statNumber}>5</Text>
-              <Text style={styles.statLabel}>Livestock Needing Health Checks</Text>
+              {/* Scheduled Dispersals */}
+              <View style={styles.summaryCard}>
+                <View style={[styles.summaryIconCircle, { backgroundColor: '#F5F9F8' }]}>
+                  <Ionicons name="calendar-outline" size={22} color="#25A18E" />
+                </View>
+                <Text style={styles.summaryNumber}>{notifCounts.dispersal}</Text>
+                <Text style={styles.summaryLabel}>Scheduled{'\n'}Dispersals</Text>
+              </View>
             </View>
           </View>
-          <View style={styles.statRowSingle}>
-            <View style={styles.statCard}>
-              <View style={[styles.statIconCircle, { backgroundColor: '#E3F4EC' }]}>
-                <Ionicons name="pulse" size={20} color="#459C8F" />
-              </View>
-              <Text style={styles.statNumber}>2</Text>
-              <Text style={styles.statLabel}>Health Updates Today</Text>
+          {/* Analytics Cards */}
+          <View style={styles.analyticsRow}>
+            {/* Pending Transfers */}
+            <View style={styles.analyticsCard}>
+              <Ionicons name="swap-horizontal" size={16} color="#2563eb" style={{ marginBottom: 2 }} />
+              <Text style={styles.analyticsNumber}>{pendingTransfers}</Text>
+              <Text style={styles.analyticsLabel}>Pending Transfers</Text>
+            </View>
+            {/* Total Dispersed */}
+            <View style={styles.analyticsCard}>
+              <Ionicons name="stats-chart" size={16} color="#e11d48" style={{ marginBottom: 2 }} />
+              <Text style={styles.analyticsNumber}>{totalDispersed}</Text>
+              <Text style={styles.analyticsLabel}>Total Dispersed (Year)</Text>
+            </View>
+            {/* Most Active Month */}
+            <View style={styles.analyticsCard}>
+              <Ionicons name="calendar" size={16} color="#f59e0b" style={{ marginBottom: 2 }} />
+              <Text style={styles.analyticsNumber}>
+                {(() => {
+                  const max = Math.max(...monthlyDispersal);
+                  if (max === 0) return '-';
+                  const idx = monthlyDispersal.findIndex(v => v === max);
+                  return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][idx];
+                })()}
+              </Text>
+              <Text style={styles.analyticsLabel}>Most Active Month</Text>
             </View>
           </View>
-          <Text style={styles.sectionTitle}>Dispersal Activities</Text>
-          <View style={styles.divider} />
-          <View style={styles.largeCardRow}>
-            <View style={[styles.largeCard, styles.gradientCard1]}>
-              <View style={styles.largeCardContent}>
-                <Ionicons name="business" size={32} color="#fff" style={styles.largeCardIcon} />
-                <View>
-                  <Text style={styles.largeCardNumber}>15</Text>
-                  <Text style={styles.largeCardLabel}>Livestock Assigned to Municipality</Text>
-                </View>
+          {/* Monthly Dispersal Trends Chart */}
+          <View style={styles.chartCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+              <View style={[styles.statIconCircle, { backgroundColor: '#E3F4EC', marginRight: 8 }]}>
+                <Ionicons name="trending-up" size={14} color="#25A18E" />
+              </View>
+              <View>
+                <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#222' }}>Monthly Dispersal Trends</Text>
+                <Text style={{ color: '#666', fontSize: 10 }}>Track livestock dispersal activities over the past year</Text>
               </View>
             </View>
-            <View style={[styles.largeCard, styles.gradientCard2]}>
-              <View style={styles.largeCardContent}>
-                <Ionicons name="business" size={32} color="#fff" style={styles.largeCardIcon} />
-                <View>
-                  <Text style={styles.largeCardNumber}>5</Text>
-                  <Text style={styles.largeCardLabel}>Livestock Needing Health Checks</Text>
-                </View>
-              </View>
-            </View>
+            <LineChart
+              data={{
+                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+                datasets: [{ data: monthlyDispersal }]
+              }}
+              width={Dimensions.get('window').width - 48}
+              height={160}
+              yAxisInterval={1}
+              chartConfig={{
+                backgroundColor: '#fff',
+                backgroundGradientFrom: '#fff',
+                backgroundGradientTo: '#fff',
+                decimalPlaces: 0,
+                color: (opacity = 1) => `rgba(37, 161, 142, ${opacity})`,
+                labelColor: (opacity = 1) => `rgba(34, 34, 34, ${opacity})`,
+                style: { borderRadius: 12 },
+                propsForDots: { r: '3', strokeWidth: '1', stroke: '#25A18E' }
+              }}
+              bezier
+              style={{ borderRadius: 12 }}
+            />
           </View>
         </>
       );
     }
   };
 
+  // When navigated to with openSection param, open the corresponding section
+  useFocusEffect(
+    React.useCallback(() => {
+      const section = route?.params?.openSection;
+      if (!section) return;
+      setShowBeneficiaries(false);
+      setShowInspect(false);
+      setShowForDispersal(false);
+      setShowTransactionScreen(null);
+      setHighlightInspectApplicantId(null);
+      setHighlightBeneficiaryApplicantId(null);
+      setHighlightDispersalScheduleId(null);
+      if (section === 'beneficiaries') setShowBeneficiaries(true);
+      else if (section === 'inspect') setShowInspect(true);
+      else if (section === 'for_dispersal') setShowForDispersal(true);
+      // Clear param so it doesn't retrigger
+      navigation.setParams({ openSection: undefined });
+    }, [route?.params?.openSection])
+  );
+
   const handleNotifChoice = (choice) => {
     setNotifModalVisible(false);
+    setShowNotifications(false);
     setShowBeneficiaries(false);
     setShowInspect(false);
     setShowForDispersal(false);
     setShowTransactionScreen(null);
+    // Manual navigation: ensure no highlight is shown
+    setHighlightInspectApplicantId(null);
+    setHighlightBeneficiaryApplicantId(null);
+    setHighlightDispersalScheduleId(null);
     if (choice === 'beneficiaries') {
       setShowBeneficiaries(true);
     } else if (choice === 'inspect') {
@@ -305,8 +637,15 @@ export default function MainScreen({ navigation, route }) {
                 placeholder="Search..."
                 placeholderTextColor="#b0b0b0"
               />
-              <TouchableOpacity>
-                <Ionicons name="notifications-outline" size={24} color="#4ca1af" />
+              <TouchableOpacity onPress={() => setShowNotifications(true)} style={{ padding: 4 }}>
+                <View>
+                  <Ionicons name="notifications-outline" size={24} color="#4ca1af" />
+                  {unreadCount > 0 ? (
+                    <View style={{ position: 'absolute', top: -2, right: -2, backgroundColor: '#E53935', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 }}>
+                      <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{unreadCount}</Text>
+                    </View>
+                  ) : null}
+                </View>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setNotifModalVisible(true)}>
                 <MaterialIcons name="menu" size={24} color="#4ca1af" />
@@ -319,7 +658,39 @@ export default function MainScreen({ navigation, route }) {
             >
               {/* Main Content */}
               <View style={styles.mainContent}>
-                {renderMainContent()}
+                {showNotifications ? (
+                  <Notifications
+                    counts={notifCounts}
+                    lastSeenCounts={lastSeenCounts}
+                    onMarkAllRead={() => {
+                      // Immediately set unread count to 0 for instant UI feedback
+                      setUnreadCount(0);
+                    }}
+                onGoTo={(target, params) => {
+                      setShowNotifications(false);
+                      setShowBeneficiaries(false);
+                      setShowInspect(false);
+                      setShowForDispersal(false);
+                      setShowTransactionScreen(null);
+                  setHighlightInspectApplicantId(null);
+                  setHighlightBeneficiaryApplicantId(null);
+                  setHighlightDispersalScheduleId(null);
+                      if (target === 'beneficiaries') {
+                        setShowBeneficiaries(true);
+                    if (params?.refId) setHighlightBeneficiaryApplicantId(params.refId);
+                      } else if (target === 'inspect') {
+                        setShowInspect(true);
+                    if (params?.refId) setHighlightInspectApplicantId(params.refId);
+                      } else if (target === 'for_dispersal') {
+                        setShowForDispersal(true);
+                    if (params?.refId) setHighlightDispersalScheduleId(params.refId);
+                      }
+                    }}
+                    onClose={() => setShowNotifications(false)}
+                  />
+                ) : (
+                  renderMainContent()
+                )}
               </View>
             </ScrollView>
           </SafeAreaView>
@@ -331,8 +702,10 @@ export default function MainScreen({ navigation, route }) {
               style={styles.navItem}
               onPress={() => {
                 setActiveTab('Dashboard');
+                setShowNotifications(false);
                 setShowBeneficiaries(false);
                 setShowInspect(false);
+                setShowForDispersal(false);
                 setShowTransactionScreen(null);
                 setScannedUID(null);
               }}
@@ -345,8 +718,10 @@ export default function MainScreen({ navigation, route }) {
                 style={styles.centerButton}
                 onPress={() => {
                   setActiveTab('Scan');
+                  setShowNotifications(false);
                   setShowBeneficiaries(false);
                   setShowInspect(false);
+                  setShowForDispersal(false);
                   setShowTransactionScreen(null);
                   setScannedUID(null);
                 }}
@@ -359,8 +734,10 @@ export default function MainScreen({ navigation, route }) {
               style={styles.navItem}
               onPress={() => {
                 setActiveTab('Profile');
+                setShowNotifications(false);
                 setShowBeneficiaries(false);
                 setShowInspect(false);
+                setShowForDispersal(false);
                 setShowTransactionScreen(null);
                 setScannedUID(null);
               }}
@@ -581,12 +958,19 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 24,
   },
+  dashboardGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
   statCard: {
-    flex: 1,
+    width: '47%',
     backgroundColor: '#fff',
     borderRadius: 12,
     alignItems: 'center',
-    marginHorizontal: 4,
+    marginBottom: 16,
     paddingVertical: 16,
     paddingHorizontal: 8,
     borderWidth: 1,
@@ -650,5 +1034,150 @@ const styles = StyleSheet.create({
     fontSize: 12,
     opacity: 0.9,
     flexWrap: 'wrap',
+  },
+  chartCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  summarySection: {
+    backgroundColor: '#e6f4f1',
+    paddingTop: 8,
+    paddingBottom: 8,
+    marginBottom: 8,
+  },
+  summaryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#25A18E',
+    marginHorizontal: 16,
+    marginBottom: 4,
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: '#CFE9E2',
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+
+  summaryGrid: {
+    paddingHorizontal: 16, // Fixed padding from screen edges
+    marginTop: 8,
+    marginBottom: 8,
+  },
+
+  summaryGridRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between', // Equal spacing between cards
+    marginBottom: 8,
+  },
+
+  summaryCard: {
+    width: '48%', // Fixed width for uniform sizing (48% allows for gap)
+    borderRadius: 14,
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    backgroundColor: '#fff',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    minHeight: 80,
+  },
+  summaryIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  summaryNumber: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#25A18E',
+    marginBottom: 1,
+  },
+  summaryLabel: {
+    fontSize: 11,
+    color: '#4ca1af',
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  analyticsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginBottom: 14,
+    marginTop: 10,
+  },
+  analyticsCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    alignItems: 'center',
+    marginHorizontal: 4,
+    paddingVertical: 10,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 1,
+    minWidth: 90,
+  },
+  analyticsNumber: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#25A18E',
+    marginBottom: 1,
+  },
+  analyticsLabel: {
+    fontSize: 10,
+    color: '#4ca1af',
+    textAlign: 'center',
+  },
+    dashboardHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e6f4f1',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 7,
+    marginBottom: 2,
+  },
+
+  dashboardHeaderIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#4ca1af',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    shadowColor: '#4ca1af',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  dashboardHeaderTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#222',
+    marginBottom: 0,
+  },
+  dashboardHeaderSubtitle: {
+    fontSize: 12,
+    color: '#4ca1af',
+    marginTop: 0,
   },
 });
