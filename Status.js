@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { db } from './src/config/firebase';
-import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 
 const livestockDetails = {
   type: 'Swine',
@@ -150,6 +150,9 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
         setBeneficiary(formattedData);
         setEditingBeneficiary(formattedData);
         console.log('Beneficiary data loaded:', formattedData);
+        
+        // Load existing status data if available
+        await loadExistingStatusData(beneficiaryData.id);
       } else {
         console.log('No beneficiary found for UID:', scannedUID);
         // Keep empty data if not found
@@ -159,6 +162,36 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
       Alert.alert('Error', 'Failed to load beneficiary information');
     } finally {
       setIsLoadingBeneficiary(false);
+    }
+  };
+
+  const loadExistingStatusData = async (beneficiaryId) => {
+    try {
+      const statusQuery = query(
+        collection(db, 'status'),
+        where('beneficiaryId', '==', beneficiaryId),
+        where('cardUid', '==', scannedUID)
+      );
+      const statusSnap = await getDocs(statusQuery);
+      
+      if (!statusSnap.empty) {
+        const statusDoc = statusSnap.docs[0];
+        const statusData = statusDoc.data();
+        
+        // Load existing status selections
+        setSelectedStatus(statusData.statusOptions || []);
+        setSelectedHealth(statusData.healthStatus || '');
+        setRemarks(statusData.remarks || '');
+        setMonthsPregnant(statusData.monthsPregnant || '');
+        setCalfAge(statusData.calfAge || '');
+        setNumCalf(statusData.numCalf || '');
+        setSoldAmount(statusData.soldAmount || '');
+        setSoldDate(statusData.soldDate || '');
+        
+        console.log('Existing status data loaded:', statusData);
+      }
+    } catch (error) {
+      console.error('Error loading existing status data:', error);
     }
   };
 
@@ -248,6 +281,14 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
     setIsSubmitting(true);
     
     try {
+      // Check if status document already exists for this beneficiary and card UID
+      const existingStatusQuery = query(
+        collection(db, 'status'),
+        where('beneficiaryId', '==', beneficiary.id),
+        where('cardUid', '==', scannedUID)
+      );
+      const existingStatusSnap = await getDocs(existingStatusQuery);
+      
       // Prepare status data
       const statusData = {
         beneficiaryId: beneficiary.id,
@@ -268,10 +309,18 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
         verificationStatus: 'pending',
       };
       
-      // Save to status collection
-      const docRef = await addDoc(collection(db, 'status'), statusData);
-      
-      console.log('Status saved successfully with ID:', docRef.id);
+      let docRef;
+      if (!existingStatusSnap.empty) {
+        // Update existing document
+        const existingDoc = existingStatusSnap.docs[0];
+        docRef = existingDoc.ref;
+        await updateDoc(docRef, statusData);
+        console.log('Status updated successfully for document ID:', existingDoc.id);
+      } else {
+        // Create new document
+        docRef = await addDoc(collection(db, 'status'), statusData);
+        console.log('Status created successfully with ID:', docRef.id);
+      }
       
       Alert.alert('Success', 'Status submitted successfully for verification!');
       onBackToTransactions();
@@ -493,7 +542,7 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
                   <Text style={styles.livestockValue}>Loading...</Text>
                 ) : (
                   <Text style={[styles.livestockValue, styles.healthStatus]}>
-                    {beneficiary.health || 'Healthy'}
+                    {selectedHealth ? healthOptions.find(opt => opt.key === selectedHealth)?.label || 'Healthy' : (beneficiary.health || 'Healthy')}
                   </Text>
                 )}
               </View>
