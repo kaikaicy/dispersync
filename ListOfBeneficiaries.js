@@ -25,6 +25,32 @@ import {
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
+// --- Helpers to normalize/parse municipality from address ---
+
+const normalize = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .replace(/["']/g, '')     // strip quotes
+    .replace(/\s+/g, ' ')     // collapse spaces
+    .trim();
+
+/** Extract municipality from a full address like:
+ *  "Purok 4, Cabanbanan, San Vicente"
+ *  We take the last comma-separated part as municipality.
+ */
+const extractMunicipalityFromAddress = (address) => {
+  const parts = String(address || '')
+    .split(',')
+    .map(p => p.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) return '';
+  // Municipality is usually the last segment
+  const last = parts[parts.length - 1];
+  return normalize(last);
+};
+
+
 // helper: chunk array for Firestore "in" queries (max 10)
 const chunk = (arr, size = 10) =>
   Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
@@ -57,6 +83,56 @@ export default function ListOfBeneficiaries() {
   const [livestockFilter, setLivestockFilter] = useState('all');
   const [livestockPickerOpen, setLivestockPickerOpen] = useState(false);
   const LIVESTOCK_OPTIONS = ['all', 'chicken', 'swine', 'carabao', 'cattle'];
+
+  const [beneficiariesLive, setBeneficiariesLive] = useState([]);
+const [loadingBeneficiariesLive, setLoadingBeneficiariesLive] = useState(true);
+
+useEffect(() => {
+  // Wait until auth is known so we can read staff municipality
+  if (!authReady) return;
+
+  // Use Firestore query to filter by municipality field
+  const qRef = staffMunicipality
+    ? query(collection(db, 'beneficiaries'), where('municipality', '==', staffMunicipality))
+    : collection(db, 'beneficiaries');
+
+  const unsub = onSnapshot(
+    qRef,
+    (snap) => {
+      const rows = snap.docs.map((d) => {
+        const data = d.data() || {};
+        
+        return {
+          id: d.id,
+          name: data.name || data.fullName || '(No name)',
+          barangay: data.barangay || null,
+          municipality: data.municipality || null, // Now using the separate municipality field
+          address: data.address || null,
+          livestock: data.livestock || data.livestocks || null,
+          contactNumber: data.contactNumber || null,
+          sex: data.sex || null,
+          age: data.age || null,
+          card_uid: data.card_uid || null,
+          inspectorName: data.inspectorName || null,
+          verificationStatus: data.verificationStatus || 'pending',
+          image: data.image || null,
+          raw: data,
+        };
+      });
+
+      setBeneficiariesLive(rows);
+      setLoadingBeneficiariesLive(false);
+    },
+    (err) => {
+      console.error('beneficiaries onSnapshot error:', err);
+      setBeneficiariesLive([]);
+      setLoadingBeneficiariesLive(false);
+      Alert.alert('Error', err?.message || 'Failed to load beneficiaries.');
+    }
+  );
+
+  return () => unsub();
+}, [authReady, staffMunicipality]);
 
   // Watch auth → fetch staff/{uid} to get inspector municipality
   useEffect(() => {
@@ -167,24 +243,19 @@ export default function ListOfBeneficiaries() {
     setIsModalVisible(false);
     setSelectedBeneficiary(null);
   };
+// Since we're now using Firestore queries to filter by municipality,
+// we can directly use beneficiariesLive (which is already filtered by municipality)
+const beneficiariesForStaff = useMemo(() => {
+  return beneficiariesLive; // Already filtered by Firestore query
+}, [beneficiariesLive]);
 
-  // Filter to staff’s municipality
-  const municipalityFiltered = useMemo(() => {
-    if (!staffMunicipality) return beneficiaries; // if unknown, show all approved
-    const target = String(staffMunicipality).toLowerCase().trim();
-    return beneficiaries.filter(
-      (b) => String(b.municipality || '').toLowerCase().trim() === target
-    );
-  }, [beneficiaries, staffMunicipality]);
-
-  // Filter by selected livestock
+  // Filter by livestock type
   const livestockFiltered = useMemo(() => {
     const target = livestockFilter.toLowerCase();
-    if (target === 'all') return municipalityFiltered;
+    if (target === 'all') return beneficiariesForStaff;
 
-    return municipalityFiltered.filter((b) => {
+    return beneficiariesForStaff.filter((b) => {
       const list = toLivestockArray(b.livestock);
-      // accept synonyms/plurals casually
       const normalized = list.map((x) =>
         x
           .replace(/poultry/, 'chicken')
@@ -195,7 +266,7 @@ export default function ListOfBeneficiaries() {
       );
       return normalized.includes(target);
     });
-  }, [municipalityFiltered, livestockFilter]);
+  }, [beneficiariesForStaff, livestockFilter]);
 
   // Search by name/barangay
   const filtered = useMemo(() => {
@@ -327,7 +398,7 @@ export default function ListOfBeneficiaries() {
         </View>
       </View>
 
-      {(!authReady || loading) ? (
+      {(!authReady || loadingBeneficiariesLive) ? (
         <View style={{ padding: 16 }}>
           <ActivityIndicator size="small" color="#25A18E" />
         </View>
@@ -423,7 +494,7 @@ export default function ListOfBeneficiaries() {
 
             {selectedBeneficiary && (
               <View>
-                <DetailRow label="Applicant ID" value={selectedBeneficiary.id} />
+                <DetailRow label="Beneficiary ID" value={selectedBeneficiary.id} />
                 <DetailRow label="Name" value={selectedBeneficiary.name} />
                 <DetailRow
                   label="Address"
@@ -438,6 +509,30 @@ export default function ListOfBeneficiaries() {
                   value={selectedBeneficiary.municipality || '—'}
                 />
                 <DetailRow
+                  label="Contact Number"
+                  value={selectedBeneficiary.contactNumber || '—'}
+                />
+                <DetailRow
+                  label="Sex"
+                  value={selectedBeneficiary.sex || '—'}
+                />
+                <DetailRow
+                  label="Age"
+                  value={selectedBeneficiary.age ? String(selectedBeneficiary.age) : '—'}
+                />
+                <DetailRow
+                  label="Card UID"
+                  value={selectedBeneficiary.card_uid || '—'}
+                />
+                <DetailRow
+                  label="Inspector"
+                  value={selectedBeneficiary.inspectorName || '—'}
+                />
+                <DetailRow
+                  label="Status"
+                  value={selectedBeneficiary.verificationStatus || '—'}
+                />
+                <DetailRow
                   label="Livestock"
                   value={
                     Array.isArray(selectedBeneficiary.livestock)
@@ -445,6 +540,12 @@ export default function ListOfBeneficiaries() {
                       : selectedBeneficiary.livestock || '—'
                   }
                 />
+                {selectedBeneficiary.image && (
+                  <DetailRow
+                    label="Image"
+                    value={selectedBeneficiary.image.url ? 'Uploaded' : '—'}
+                  />
+                )}
               </View>
             )}
 

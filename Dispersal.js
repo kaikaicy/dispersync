@@ -16,6 +16,9 @@ import {
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
+// ⬇️ changed: include uploadBytesResumable
+import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+
 // helper: calculate age from Firestore Timestamp
 const calculateAge = (birthdayTs) => {
   if (!birthdayTs) return null;
@@ -30,6 +33,83 @@ const calculateAge = (birthdayTs) => {
     return age;
   } catch {
     return null;
+  }
+};
+
+/** ---- DROP-IN uploader for React Native / Expo ----
+ *  - Works with file:// and content:// URIs
+ *  - Sets contentType + cacheControl
+ *  - Uses uploadBytesResumable (safer on mobile)
+ */
+const uploadImageToStorage = async (imageUri, livestockId) => {
+  try {
+    if (!imageUri) return null;
+
+    // Detect filename + extension
+    const uri = String(imageUri);
+    const nameFromUri = uri.split('/').pop() || `photo_${Date.now()}.jpg`;
+    const ext = (nameFromUri.split('.').pop() || 'jpg').toLowerCase();
+
+    const contentType =
+      ext === 'png'  ? 'image/png'  :
+      ext === 'webp' ? 'image/webp' :
+      ext === 'heic' ? 'image/heic' :
+      ext === 'gif'  ? 'image/gif'  :
+      /* default */    'image/jpeg';
+
+    // Convert URI -> Blob (fetch works in Expo; keep XHR fallback for older Androids)
+    const uriToBlob = async (fileUri) => {
+      try {
+        const res = await fetch(fileUri);
+        return await res.blob();
+      } catch {
+        return await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = function () { resolve(xhr.response); };
+          xhr.onerror = function () { reject(new TypeError('Network request failed')); };
+          xhr.responseType = 'blob';
+          xhr.open('GET', fileUri, true);
+          xhr.send(null);
+        });
+      }
+    };
+
+    const blob = await uriToBlob(uri);
+
+    const storage = getStorage();
+    const safeId =
+      (livestockId || `livestock_${Date.now()}`).toString().replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    const filename = `${safeId}_${Date.now()}.${ext}`;
+    const storagePath = `images/${filename}`;
+    const storageRef = ref(storage, storagePath);
+
+    const metadata = {
+      contentType,
+      cacheControl: 'public, max-age=31536000',
+    };
+
+    const task = uploadBytesResumable(storageRef, blob, metadata);
+
+    await new Promise((resolve, reject) => {
+      task.on('state_changed', null, reject, resolve);
+    });
+
+    const downloadURL = await getDownloadURL(storageRef);
+
+    try { if (blob && typeof blob.close === 'function') blob.close(); } catch {}
+
+    return {
+      url: downloadURL,
+      path: storageRef.fullPath,
+      name: filename,
+      size: blob.size ?? null,
+      contentType,
+      uploadedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('Error uploading image:', error);
+    return null; // allow the rest of the flow to continue
   }
 };
 
@@ -51,13 +131,11 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
   const [livestockBreed, setLivestockBreed] = useState('');
   const [livestockMarkings, setLivestockMarkings] = useState('');
 
-
   // Start as null → user must pick a date (not defaulting to today)
   const [dateDisperse, setDateDisperse] = useState(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   const [isLoadingScheduled, setIsLoadingScheduled] = useState(false);
-
 
   // ————————————————————————————————————————
   // Get staff municipality on auth state change
@@ -168,7 +246,8 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
   // ————————————————————————————————————————
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      // new API to quiet deprecation warning; identical behavior
+      mediaTypes: [ImagePicker.MediaType.IMAGE],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 0.9,
@@ -184,7 +263,6 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
     });
     if (!result.canceled) setImage(result.assets[0].uri);
   };
-
 
   const selectApplicant = (option) => {
     const app = option.data || option; // Handle both dropdown format and direct data
@@ -258,13 +336,27 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
         console.error('Error fetching inspector details:', error);
       }
 
-      // — 1) Save to "livestock"
+      // — 1) Upload image to Firebase Storage if present (uses new uploader)
+      let imageData = null;
+      if (image) {
+        const tempLivestockId = `${selectedApplicant.id}_${Date.now()}`;
+        imageData = await uploadImageToStorage(image, tempLivestockId);
+        if (imageData) {
+          console.log('Image uploaded successfully:', imageData);
+        } else {
+          console.log('Image upload failed, continuing without image');
+        }
+      }
+
+      // — 2) Save to "livestock"
       const livestockId = `${selectedApplicant.id}_${Date.now()}`; // doc id + field
       const livestockPayload = {
         // NOTE: per your request, DO NOT store applicantId here.
         livestockId,                         // ✅ keep livestockId inside the doc
         applicantName: selectedApplicant.fullName || currentBeneficiary || '',
         municipality: selectedApplicant.municipality,
+        barangay: applicantDetails?.barangay || selectedApplicant.barangay || null, // ✅ Save barangay
+        livestockSource: selectedApplicant.livestockSource || null, // ✅ Save livestock source
         inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector',
 
         livestockType: livestockType.trim(),
@@ -282,7 +374,7 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
 
       await setDoc(doc(db, 'livestock', livestockId), livestockPayload);
 
-      // — 2) Also save to "beneficiaries"
+      // — 3) Also save to "beneficiaries"
       // Concatenate full address from applicant details
       const addressParts = [];
       if (applicantDetails?.street) addressParts.push(applicantDetails.street);
@@ -302,6 +394,8 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
       const beneficiaryPayload = {
         name: selectedApplicant.fullName || currentBeneficiary || '',
         address: fullAddress,
+        municipality: selectedApplicant.municipality, // ✅ Store municipality separately
+        barangay: applicantDetails?.barangay || selectedApplicant.barangay || null, // ✅ Store barangay separately
         applicantId: selectedApplicant.applicantId || null, // ✅ Save applicant ID
         sex: applicantDetails?.gender || selectedApplicant.gender || null,
         age: applicantDetails?.age || calculateAge(applicantDetails?.birthday) || calculateAge(selectedApplicant.birthday) || null,
@@ -313,6 +407,7 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
         fieldInputBy: { uid, email: email || null },
         inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector', // ✅ Save inspector name
         verificationStatus: 'pending',
+        image: imageData, // ✅ Store image data (URL, path, size, uploadedAt) or null if upload failed
         createdAt: serverTimestamp(),
       };
 
@@ -401,7 +496,7 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
           )}
 
           {/* Basic Information Section */}
-          <View style={styles.section}>
+          <View className="section" style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.primary }]}>Basic Information</Text>
             <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>
               Enter the basic details of the beneficiary and livestock
@@ -477,7 +572,6 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
               placeholderTextColor={colors.textLight}
             />
 
-
             {/* Date Disperse (user-picked) */}
             <Text style={[styles.inputLabel, { color: colors.primary }]}>Date Disperse</Text>
             <TouchableOpacity
@@ -538,8 +632,6 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
           </TouchableOpacity>
         </View>
       </ScrollView>
-
-
     </SafeAreaView>
   );
 }
@@ -680,22 +772,7 @@ const styles = StyleSheet.create({
   modalItem: { paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#E3F4EC' },
   modalButton: { marginTop: 16, padding: 12, borderRadius: 8, alignItems: 'center' },
   modalButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 16 },
-  // Documentation styles
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#25A18E',
-    marginBottom: 4,
-  },
-  sectionSubtitle: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 16,
-    fontWeight: '500',
-  },
+
   photoBtn: {
     paddingVertical: 12,
     paddingHorizontal: 20,
@@ -707,7 +784,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
   },
-  // UID Display styles
+
   uidDisplayContainer: {
     flexDirection: 'row',
     alignItems: 'center',

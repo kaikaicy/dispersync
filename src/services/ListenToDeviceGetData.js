@@ -68,8 +68,8 @@ export function createDeviceListener(opts = {}) {
   let pendingResolvers = []; // for waitForNextUID
 
   // Optional dummy data for testing
-  const DUMMY_UID = "AA:BB:CC:DD:EE";
-  let dummyDataEnabled = true;
+  //const DUMMY_UID = "AA:BB:CC:DD:EE";
+  let dummyDataEnabled = false;
 
   function _emit(uid) {
     const now = Date.now();

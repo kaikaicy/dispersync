@@ -3,6 +3,8 @@ import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Act
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getBeneficiaryDataByUID } from './src/services/GetBeneficiaryDataBasedOnUIDService';
+import { db } from './src/config/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 export default function Transaction({ navigation, onSelectTransaction, scannedUID }) {
   const [isValidating, setIsValidating] = useState(false);
@@ -57,6 +59,32 @@ export default function Transaction({ navigation, onSelectTransaction, scannedUI
     setIsNewCard(false);
 
     try {
+      // First try to get data from beneficiaries collection using card_uid
+      const beneficiariesQuery = query(
+        collection(db, 'beneficiaries'),
+        where('card_uid', '==', scannedUID)
+      );
+      const beneficiariesSnap = await getDocs(beneficiariesQuery);
+      
+      if (!beneficiariesSnap.empty) {
+        // Found in beneficiaries collection
+        const beneficiaryDoc = beneficiariesSnap.docs[0];
+        const beneficiaryData = {
+          id: beneficiaryDoc.id,
+          ...beneficiaryDoc.data()
+        };
+        
+        setBeneficiaryData(beneficiaryData);
+        setValidationResult({
+          exists: true,
+          data: beneficiaryData,
+          source: 'beneficiaries'
+        });
+        setIsNewCard(false);
+        return;
+      }
+
+      // Fallback to the original service if not found in beneficiaries
       const result = await getBeneficiaryDataByUID(scannedUID);
       setValidationResult(result);
       
@@ -67,6 +95,7 @@ export default function Transaction({ navigation, onSelectTransaction, scannedUI
         setIsNewCard(true);
       }
     } catch (error) {
+      console.error('Error validating UID:', error);
       setValidationResult({
         exists: false,
         data: null,
@@ -166,8 +195,21 @@ export default function Transaction({ navigation, onSelectTransaction, scannedUI
             )}
             {beneficiaryData && (
               <View style={styles.beneficiaryInfo}>
-                <Text style={styles.beneficiaryName}>{beneficiaryData.fullName || 'Unknown Beneficiary'}</Text>
-              
+                <Text style={styles.beneficiaryName}>
+                  {beneficiaryData.name || beneficiaryData.fullName || 'Unknown Beneficiary'}
+                </Text>
+                {beneficiaryData.municipality && (
+                  <Text style={styles.beneficiaryDetails}>
+                    {beneficiaryData.barangay ? `${beneficiaryData.barangay}, ` : ''}{beneficiaryData.municipality}
+                  </Text>
+                )}
+                {beneficiaryData.livestock && (
+                  <Text style={styles.beneficiaryDetails}>
+                    Livestock: {Array.isArray(beneficiaryData.livestock) 
+                      ? beneficiaryData.livestock.join(', ') 
+                      : beneficiaryData.livestock}
+                  </Text>
+                )}
               </View>
             )}
             <Text style={styles.subtitle}>

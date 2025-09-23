@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { db } from './src/config/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 const livestockDetails = {
   type: 'Swine',
@@ -39,7 +41,7 @@ const colors = {
   disabled: '#BDC3C7',
 };
 
-export default function Status({ onBackToTransactions, navigation }) {
+export default function Status({ onBackToTransactions, navigation, scannedUID }) {
   console.log('Status component rendered with navigation:', navigation);
   const [selectedStatus, setSelectedStatus] = useState([]);
   const [selectedHealth, setSelectedHealth] = useState('');
@@ -51,23 +53,109 @@ export default function Status({ onBackToTransactions, navigation }) {
   const [soldDate, setSoldDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditingBeneficiary, setIsEditingBeneficiary] = useState(false);
+  const [isLoadingBeneficiary, setIsLoadingBeneficiary] = useState(false);
   const [beneficiary, setBeneficiary] = useState({
-    municipality: 'Municipality of Paracale',
-    name: 'Raymundo, Jan Vincent M.',
-    address: 'Paracale',
-    sex: 'Male',
-    age: 22,
-    contact: '0972342634',
+    municipality: '',
+    name: '',
+    address: '',
+    sex: '',
+    age: '',
+    contact: '',
+    livestock: '',
+    livestockId: '',
+    health: 'Healthy',
+    dateDisperse: null,
   });
 
   const [editingBeneficiary, setEditingBeneficiary] = useState({
-    municipality: 'Municipality of Paracale',
-    name: 'Raymundo, Jan Vincent M.',
-    address: 'Paracale',
-    sex: 'Male',
-    age: 22,
-    contact: '0972342634',
+    municipality: '',
+    name: '',
+    address: '',
+    sex: '',
+    age: '',
+    contact: '',
+    livestock: '',
+    livestockId: '',
+    health: 'Healthy',
+    dateDisperse: null,
   });
+
+  // Fetch beneficiary data when scannedUID changes
+  useEffect(() => {
+    if (scannedUID) {
+      fetchBeneficiaryData();
+    } else {
+      // Reset beneficiary data when no UID
+      setBeneficiary({
+        municipality: '',
+        name: '',
+        address: '',
+        sex: '',
+        age: '',
+        contact: '',
+        livestock: '',
+        livestockId: '',
+        health: 'Healthy',
+        dateDisperse: null,
+      });
+      setEditingBeneficiary({
+        municipality: '',
+        name: '',
+        address: '',
+        sex: '',
+        age: '',
+        contact: '',
+        livestock: '',
+        livestockId: '',
+        health: 'Healthy',
+        dateDisperse: null,
+      });
+    }
+  }, [scannedUID]);
+
+  const fetchBeneficiaryData = async () => {
+    setIsLoadingBeneficiary(true);
+    try {
+      const beneficiariesQuery = query(
+        collection(db, 'beneficiaries'),
+        where('card_uid', '==', scannedUID)
+      );
+      const beneficiariesSnap = await getDocs(beneficiariesQuery);
+      
+      if (!beneficiariesSnap.empty) {
+        const beneficiaryDoc = beneficiariesSnap.docs[0];
+        const beneficiaryData = {
+          id: beneficiaryDoc.id,
+          ...beneficiaryDoc.data()
+        };
+        
+        const formattedData = {
+          municipality: beneficiaryData.municipality || '',
+          name: beneficiaryData.name || '',
+          address: beneficiaryData.address || '',
+          sex: beneficiaryData.sex || '',
+          age: beneficiaryData.age ? String(beneficiaryData.age) : '',
+          contact: beneficiaryData.contactNumber || '',
+          livestock: beneficiaryData.livestock || '',
+          livestockId: beneficiaryData.livestockId || '',
+          health: 'Healthy', // Default health status
+          dateDisperse: beneficiaryData.dateDisperse || null,
+        };
+        
+        setBeneficiary(formattedData);
+        setEditingBeneficiary(formattedData);
+        console.log('Beneficiary data loaded:', formattedData);
+      } else {
+        console.log('No beneficiary found for UID:', scannedUID);
+        // Keep empty data if not found
+      }
+    } catch (error) {
+      console.error('Error fetching beneficiary data:', error);
+      Alert.alert('Error', 'Failed to load beneficiary information');
+    } finally {
+      setIsLoadingBeneficiary(false);
+    }
+  };
 
   const toggleStatus = (key) => {
     if (key === 'dead') {
@@ -206,14 +294,27 @@ export default function Status({ onBackToTransactions, navigation }) {
             <Text style={styles.pageSubtitle}>
               Fill the details below to add an update to livestock
             </Text>
+            {scannedUID && (
+              <View style={styles.uidContainer}>
+                <Ionicons 
+                  name="checkmark-circle"
+                  size={20} 
+                  color="#25A18E" 
+                  style={styles.uidIcon} 
+                />
+                <Text style={styles.uidText}>
+                  Card UID: {scannedUID}
+                </Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.beneficiaryCard}>
             <View style={styles.beneficiaryHeader}>
               <Text style={styles.beneficiaryTitle}>
-                {isEditingBeneficiary ? editingBeneficiary.municipality : beneficiary.municipality}
+                {isLoadingBeneficiary ? 'Loading...' : (isEditingBeneficiary ? editingBeneficiary.municipality : beneficiary.municipality)}
               </Text>
-              {!isEditingBeneficiary && (
+              {!isEditingBeneficiary && !isLoadingBeneficiary && (
                 <TouchableOpacity style={styles.editButton} onPress={handleEditBeneficiary}>
                   <Ionicons name="create-outline" size={16} color={colors.white} />
                   <Text style={styles.editButtonText}>EDIT</Text>
@@ -223,7 +324,9 @@ export default function Status({ onBackToTransactions, navigation }) {
             <View style={styles.beneficiaryDetails}>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Name:</Text>
-                {isEditingBeneficiary ? (
+                {isLoadingBeneficiary ? (
+                  <Text style={styles.beneficiaryValue}>Loading...</Text>
+                ) : isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
                     value={editingBeneficiary.name}
@@ -232,12 +335,14 @@ export default function Status({ onBackToTransactions, navigation }) {
                     placeholderTextColor={colors.textLight}
                   />
                 ) : (
-                  <Text style={styles.beneficiaryValue}>{beneficiary.name}</Text>
+                  <Text style={styles.beneficiaryValue}>{beneficiary.name || '—'}</Text>
                 )}
               </View>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Address:</Text>
-                {isEditingBeneficiary ? (
+                {isLoadingBeneficiary ? (
+                  <Text style={styles.beneficiaryValue}>Loading...</Text>
+                ) : isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
                     value={editingBeneficiary.address}
@@ -246,12 +351,14 @@ export default function Status({ onBackToTransactions, navigation }) {
                     placeholderTextColor={colors.textLight}
                   />
                 ) : (
-                  <Text style={styles.beneficiaryValue}>{beneficiary.address}</Text>
+                  <Text style={styles.beneficiaryValue}>{beneficiary.address || '—'}</Text>
                 )}
               </View>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Sex:</Text>
-                {isEditingBeneficiary ? (
+                {isLoadingBeneficiary ? (
+                  <Text style={styles.beneficiaryValue}>Loading...</Text>
+                ) : isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
                     value={editingBeneficiary.sex}
@@ -260,27 +367,31 @@ export default function Status({ onBackToTransactions, navigation }) {
                     placeholderTextColor={colors.textLight}
                   />
                 ) : (
-                  <Text style={styles.beneficiaryValue}>{beneficiary.sex}</Text>
+                  <Text style={styles.beneficiaryValue}>{beneficiary.sex || '—'}</Text>
                 )}
               </View>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Age:</Text>
-                {isEditingBeneficiary ? (
+                {isLoadingBeneficiary ? (
+                  <Text style={styles.beneficiaryValue}>Loading...</Text>
+                ) : isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
-                    value={editingBeneficiary.age.toString()}
-                    onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, age: parseInt(text) || 0 }))}
+                    value={editingBeneficiary.age}
+                    onChangeText={(text) => setEditingBeneficiary(prev => ({ ...prev, age: text }))}
                     placeholder="Enter age"
                     placeholderTextColor={colors.textLight}
                     keyboardType="numeric"
                   />
                 ) : (
-                  <Text style={styles.beneficiaryValue}>{beneficiary.age}</Text>
+                  <Text style={styles.beneficiaryValue}>{beneficiary.age || '—'}</Text>
                 )}
               </View>
               <View style={styles.beneficiaryRow}>
                 <Text style={styles.beneficiaryLabel}>Contact:</Text>
-                {isEditingBeneficiary ? (
+                {isLoadingBeneficiary ? (
+                  <Text style={styles.beneficiaryValue}>Loading...</Text>
+                ) : isEditingBeneficiary ? (
                   <TextInput
                     style={styles.beneficiaryInput}
                     value={editingBeneficiary.contact}
@@ -290,7 +401,7 @@ export default function Status({ onBackToTransactions, navigation }) {
                     keyboardType="phone-pad"
                   />
                 ) : (
-                  <Text style={styles.beneficiaryValue}>{beneficiary.contact}</Text>
+                  <Text style={styles.beneficiaryValue}>{beneficiary.contact || '—'}</Text>
                 )}
               </View>
               {isEditingBeneficiary && (
@@ -315,19 +426,47 @@ export default function Status({ onBackToTransactions, navigation }) {
             <View style={styles.livestockDetails}>
               <View style={styles.livestockRow}>
                 <Text style={styles.livestockLabel}>Type:</Text>
-                <Text style={styles.livestockValue}>{livestockDetails.type}</Text>
+                {isLoadingBeneficiary ? (
+                  <Text style={styles.livestockValue}>Loading...</Text>
+                ) : (
+                  <Text style={styles.livestockValue}>
+                    {Array.isArray(beneficiary.livestock) 
+                      ? beneficiary.livestock.join(', ') 
+                      : beneficiary.livestock || '—'}
+                  </Text>
+                )}
               </View>
               <View style={styles.livestockRow}>
                 <Text style={styles.livestockLabel}>ID:</Text>
-                <Text style={styles.livestockValue}>{livestockDetails.id}</Text>
+                {isLoadingBeneficiary ? (
+                  <Text style={styles.livestockValue}>Loading...</Text>
+                ) : (
+                  <Text style={styles.livestockValue}>{beneficiary.livestockId || '—'}</Text>
+                )}
               </View>
               <View style={styles.livestockRow}>
                 <Text style={styles.livestockLabel}>Health:</Text>
-                <Text style={styles.livestockValue}>{livestockDetails.health}</Text>
+                {isLoadingBeneficiary ? (
+                  <Text style={styles.livestockValue}>Loading...</Text>
+                ) : (
+                  <Text style={[styles.livestockValue, styles.healthStatus]}>
+                    {beneficiary.health || 'Healthy'}
+                  </Text>
+                )}
               </View>
               <View style={styles.livestockRow}>
                 <Text style={styles.livestockLabel}>Date:</Text>
-                <Text style={styles.livestockValue}>{livestockDetails.date}</Text>
+                {isLoadingBeneficiary ? (
+                  <Text style={styles.livestockValue}>Loading...</Text>
+                ) : (
+                  <Text style={styles.livestockValue}>
+                    {beneficiary.dateDisperse 
+                      ? (beneficiary.dateDisperse.toDate ? 
+                          beneficiary.dateDisperse.toDate().toLocaleDateString() : 
+                          new Date(beneficiary.dateDisperse).toLocaleDateString())
+                      : '—'}
+                  </Text>
+                )}
               </View>
             </View>
           </View>
@@ -1119,5 +1258,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
     marginLeft: 8,
+  },
+  uidContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F4EC',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+  },
+  uidIcon: {
+    marginRight: 8,
+  },
+  uidText: {
+    color: '#25A18E',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: 'monospace',
+  },
+  healthStatus: {
+    color: '#4CAF50',
+    fontWeight: '600',
   },
 });
