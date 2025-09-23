@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { db } from './src/config/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 
 const livestockDetails = {
   type: 'Swine',
@@ -55,6 +55,7 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
   const [isEditingBeneficiary, setIsEditingBeneficiary] = useState(false);
   const [isLoadingBeneficiary, setIsLoadingBeneficiary] = useState(false);
   const [beneficiary, setBeneficiary] = useState({
+    id: '',
     municipality: '',
     name: '',
     address: '',
@@ -68,6 +69,7 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
   });
 
   const [editingBeneficiary, setEditingBeneficiary] = useState({
+    id: '',
     municipality: '',
     name: '',
     address: '',
@@ -87,6 +89,7 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
     } else {
       // Reset beneficiary data when no UID
       setBeneficiary({
+        id: '',
         municipality: '',
         name: '',
         address: '',
@@ -99,6 +102,7 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
         dateDisperse: null,
       });
       setEditingBeneficiary({
+        id: '',
         municipality: '',
         name: '',
         address: '',
@@ -130,6 +134,7 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
         };
         
         const formattedData = {
+          id: beneficiaryData.id, // Include the beneficiary ID
           municipality: beneficiaryData.municipality || '',
           name: beneficiaryData.name || '',
           address: beneficiaryData.address || '',
@@ -223,7 +228,7 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
     setIsEditingBeneficiary(false);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (selectedStatus.length === 0) {
       Alert.alert('Validation Error', 'Please select at least one status option.');
       return;
@@ -233,12 +238,50 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
       return;
     }
     
+    if (!beneficiary.id) {
+      console.log('Beneficiary data:', beneficiary);
+      console.log('Beneficiary ID:', beneficiary.id);
+      Alert.alert('Error', 'No beneficiary data found. Please scan a valid card.');
+      return;
+    }
+    
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    
+    try {
+      // Prepare status data
+      const statusData = {
+        beneficiaryId: beneficiary.id,
+        statusOptions: selectedStatus,
+        healthStatus: selectedHealth || null,
+        remarks: remarks.trim() || null,
+        
+        // Additional details based on selected status
+        monthsPregnant: selectedStatus.includes('pregnant') ? monthsPregnant.trim() || null : null,
+        calfAge: selectedStatus.includes('with_calf') ? calfAge.trim() || null : null,
+        numCalf: selectedStatus.includes('with_calf') ? numCalf.trim() || null : null,
+        soldAmount: selectedStatus.includes('sold') ? soldAmount.trim() || null : null,
+        soldDate: selectedStatus.includes('sold') ? soldDate.trim() || null : null,
+        
+        // Metadata
+        cardUid: scannedUID,
+        submittedAt: serverTimestamp(),
+        verificationStatus: 'pending',
+      };
+      
+      // Save to status collection
+      const docRef = await addDoc(collection(db, 'status'), statusData);
+      
+      console.log('Status saved successfully with ID:', docRef.id);
+      
       Alert.alert('Success', 'Status submitted successfully for verification!');
       onBackToTransactions();
-    }, 2000);
+      
+    } catch (error) {
+      console.error('Error saving status:', error);
+      Alert.alert('Error', 'Failed to submit status. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleCullingPress = () => {
