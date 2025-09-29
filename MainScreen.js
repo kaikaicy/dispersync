@@ -235,46 +235,24 @@ export default function MainScreen({ navigation, route }) {
       console.error('Applicants listener setup failed:', e);
     }
 
-    // Approved beneficiaries (inspections.status == 'approved'), dedup by applicant and filter by municipality
+    // Approved beneficiaries - use the beneficiaries collection directly for accurate count
     try {
+      const qRef = staffMunicipality
+        ? query(collection(db, 'beneficiaries'), where('municipality', '==', staffMunicipality))
+        : collection(db, 'beneficiaries');
+        
       const unsubBeneficiaries = onSnapshot(
-        query(collection(db, 'inspections'), where('status', '==', 'approved')),
-        async (snap) => {
+        qRef,
+        (snap) => {
           try {
-            const inspections = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            const applicantIds = Array.from(new Set(inspections.map((r) => r.applicantId).filter(Boolean)));
-            if (applicantIds.length === 0) {
-              setNotifCounts((prev) => ({ ...prev, beneficiaries: 0 }));
-              return;
-            }
-            // batch fetch applicants
-            const applicantsMap = {};
-            for (let i = 0; i < applicantIds.length; i += 10) {
-              const batch = applicantIds.slice(i, i + 10);
-              const qs = await getDocs(query(collection(db, 'applicants'), where(documentId(), 'in', batch)));
-              qs.forEach((docSnap) => {
-                applicantsMap[docSnap.id] = docSnap.data();
-              });
-            }
-            // dedup by applicant, apply muni filter
-            const seen = new Set();
-            let count = 0;
-            for (const insp of inspections) {
-              const appId = insp.applicantId;
-              if (!appId || seen.has(appId)) continue;
-              seen.add(appId);
-              const app = applicantsMap[appId] || {};
-              const muni = app.municipality || '-';
-              if (!staffMunicipality || String(muni).toLowerCase().trim() === String(staffMunicipality).toLowerCase().trim()) {
-                count += 1;
-              }
-            }
+            // Count the actual number of beneficiaries in the collection
+            const count = snap.docs.length;
             setNotifCounts((prev) => ({ ...prev, beneficiaries: count }));
           } catch (err) {
             console.error('Beneficiaries count load failed:', err);
           }
         },
-        (err) => console.error('onSnapshot inspections error:', err)
+        (err) => console.error('onSnapshot beneficiaries error:', err)
       );
       unsubscribers.push(unsubBeneficiaries);
     } catch (e) {
@@ -544,7 +522,7 @@ export default function MainScreen({ navigation, route }) {
                 labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
                 datasets: [{ data: monthlyDispersal }]
               }}
-              width={Dimensions.get('window').width - 48}
+              width={Dimensions.get('window').width - 64}
               height={160}
               yAxisInterval={1}
               chartConfig={{
@@ -560,6 +538,72 @@ export default function MainScreen({ navigation, route }) {
               bezier
               style={{ borderRadius: 12 }}
             />
+          </View>
+          
+          {/* List Components Section */}
+          <View style={styles.listsSection}>
+            {/* List for Dispersal */}
+            <View style={styles.listCard}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <View style={[styles.statIconCircle, { backgroundColor: '#E3F4EC', marginRight: 8 }]}>
+                  <Ionicons name="calendar-outline" size={14} color="#25A18E" />
+                </View>
+                <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#222' }}>List for Dispersal</Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.viewListButton}
+                onPress={() => {
+                  setShowBeneficiaries(false);
+                  setShowInspect(false);
+                  setShowForDispersal(true);
+                }}
+              >
+                <Text style={styles.viewListButtonText}>View List</Text>
+                <Ionicons name="chevron-forward" size={16} color="#25A18E" />
+              </TouchableOpacity>
+            </View>
+            
+            {/* List to Inspect */}
+            <View style={styles.listCard}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <View style={[styles.statIconCircle, { backgroundColor: '#E3F4EC', marginRight: 8 }]}>
+                  <Ionicons name="clipboard-outline" size={14} color="#25A18E" />
+                </View>
+                <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#222' }}>List to Inspect</Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.viewListButton}
+                onPress={() => {
+                  setShowBeneficiaries(false);
+                  setShowInspect(true);
+                  setShowForDispersal(false);
+                }}
+              >
+                <Text style={styles.viewListButtonText}>View List</Text>
+                <Ionicons name="chevron-forward" size={16} color="#25A18E" />
+              </TouchableOpacity>
+            </View>
+            
+            {/* List of Beneficiaries */}
+            <View style={styles.listCard}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <View style={[styles.statIconCircle, { backgroundColor: '#E3F4EC', marginRight: 8 }]}>
+                  <Ionicons name="people-outline" size={14} color="#25A18E" />
+                </View>
+                <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#222' }}>List of Beneficiaries</Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.viewListButton}
+                onPress={() => {
+                  setShowBeneficiaries(true);
+                  setShowInspect(false);
+                  setShowForDispersal(false);
+                }}
+              >
+                <Text style={styles.viewListButtonText}>View List</Text>
+                <Ionicons name="chevron-forward" size={16} color="#25A18E" />
+              </TouchableOpacity>
+            </View>
           </View>
         </>
       );
@@ -647,9 +691,7 @@ export default function MainScreen({ navigation, route }) {
                   ) : null}
                 </View>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setNotifModalVisible(true)}>
-                <MaterialIcons name="menu" size={24} color="#4ca1af" />
-              </TouchableOpacity>
+              {/* Menu button removed as per requirements */}
             </View>
             <ScrollView
               style={styles.scrollView}
@@ -806,7 +848,37 @@ export default function MainScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#e6f4f1',
+    backgroundColor: '#f5f5f5',
+  },
+  listsSection: {
+    marginTop: 16,
+    marginBottom: 16,
+    marginHorizontal: 16,
+  },
+  listCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  viewListButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f5f9f8',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+  },
+  viewListButtonText: {
+    color: '#25A18E',
+    fontWeight: '600',
+    fontSize: 14,
   },
   scrollView: {
     flex: 1,
@@ -1038,14 +1110,14 @@ const styles = StyleSheet.create({
   chartCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 12,
+    padding: 16,
     marginHorizontal: 16,
     marginBottom: 18,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
+    shadowOpacity: 0.1,
     shadowRadius: 2,
-    elevation: 1,
+    elevation: 2,
   },
   summarySection: {
     backgroundColor: '#e6f4f1',
@@ -1069,7 +1141,7 @@ const styles = StyleSheet.create({
 
   summaryGrid: {
     paddingHorizontal: 16, // Fixed padding from screen edges
-    marginTop: 8,
+    marginTop: 16,
     marginBottom: 8,
   },
 
@@ -1116,9 +1188,9 @@ const styles = StyleSheet.create({
   analyticsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginHorizontal: 16,
+    marginTop: 16,
     marginBottom: 14,
-    marginTop: 10,
+    marginHorizontal: 16,
   },
   analyticsCard: {
     flex: 1,

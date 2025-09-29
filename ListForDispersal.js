@@ -40,8 +40,7 @@ export default function ListForDispersal({ highlightScheduleId }) {
   useEffect(() => {
     if (highlightScheduleId) {
       setHighlightId(highlightScheduleId);
-      const t = setTimeout(() => setHighlightId(null), 6000);
-      return () => clearTimeout(t);
+      // Removed timeout - highlight will persist until user interaction
     }
   }, [highlightScheduleId]);
 
@@ -250,6 +249,10 @@ export default function ListForDispersal({ highlightScheduleId }) {
                   b.id === highlightId ? { backgroundColor: '#FFF3CD', borderWidth: 1, borderColor: '#FFC107' } : null,
                 ]}
                 onPress={() => {
+                  // Clear highlight if clicking on the highlighted item
+                  if (b.id === highlightId) {
+                    setHighlightId(null);
+                  }
                   setSelectedApplicant(b);
                   setIsModalVisible(true);
                 }}

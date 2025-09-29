@@ -68,7 +68,16 @@ const toLivestockArray = (val) => {
     .filter(Boolean);
 };
 
-export default function ListOfBeneficiaries() {
+export default function ListOfBeneficiaries({ highlightApplicantId }) {
+  const [highlightId, setHighlightId] = useState(null);
+  
+  // Set highlight ID when prop changes
+  useEffect(() => {
+    if (highlightApplicantId) {
+      setHighlightId(highlightApplicantId);
+      // No timeout - highlight will persist until user interaction
+    }
+  }, [highlightApplicantId]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedBeneficiary, setSelectedBeneficiary] = useState(null);
 
@@ -415,11 +424,13 @@ const beneficiariesForStaff = useMemo(() => {
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',
-                  backgroundColor: '#fff',
+                  backgroundColor: b.id === highlightId ? '#FFF3CD' : '#fff',
                   marginHorizontal: 8,
                   marginVertical: 4,
                   borderRadius: 8,
                   padding: 10,
+                  borderWidth: b.id === highlightId ? 1 : 0,
+                  borderColor: b.id === highlightId ? '#FFC107' : 'transparent',
                 }}
               >
                 <Text style={{ flex: 2, color: '#333' }}>{b.name}</Text>
@@ -433,6 +444,10 @@ const beneficiariesForStaff = useMemo(() => {
                     alignItems: 'center',
                   }}
                   onPress={() => {
+                    // Clear highlight if clicking on the highlighted item
+                    if (b.id === highlightId) {
+                      setHighlightId(null);
+                    }
                     setSelectedBeneficiary(b);
                     setIsModalVisible(true);
                   }}

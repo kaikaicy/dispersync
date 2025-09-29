@@ -82,6 +82,42 @@ export function startNotificationsSync(userId, staffMunicipality, staffRole) {
   }
   const unsubs = [];
 
+  // New beneficiaries notification
+  try {
+    const unsubNewBeneficiaries = onSnapshot(collection(db, 'beneficiaries'), async (snap) => {
+      const municipalityGroups = new Map();
+      
+      for (const d of snap.docs) {
+        const data = d.data();
+        const muni = data.municipality || data.municipalityName || data.area || '';
+        if (!muni) continue;
+        
+        // Group by municipality
+        if (!municipalityGroups.has(muni)) {
+          municipalityGroups.set(muni, []);
+        }
+        municipalityGroups.get(muni).push({ id: d.id, data });
+      }
+      
+      // Send notifications to all staff in each municipality
+      for (const [municipality, beneficiaries] of municipalityGroups) {
+        for (const { id, data } of beneficiaries) {
+          const name = data.fullName || data.name || 'Beneficiary';
+          const notifId = `new_beneficiary_${id}`;
+          await sendNotificationToMunicipality(municipality, notifId, {
+            type: 'beneficiaries',
+            refId: id,
+            title: 'New Beneficiary',
+            message: `${name} is now a beneficiary.`,
+          });
+        }
+      }
+    });
+    unsubs.push(unsubNewBeneficiaries);
+  } catch (e) {
+    console.error('New beneficiaries notifications sync failed:', e);
+  }
+
   // Applicants needing inspection → notification per applicant
   try {
     const unsubApplicants = onSnapshot(collection(db, 'applicants'), async (snap) => {
@@ -157,8 +193,8 @@ export function startNotificationsSync(userId, staffMunicipality, staffRole) {
           await sendNotificationToMunicipality(municipality, notifId, {
             type: 'beneficiaries',
             refId: id,
-            title: 'New beneficiary approved',
-            message: `${name} is now a beneficiary`,
+            title: 'Inspection Form Approved',
+            message: `The inspection form for ${name} has been approved.`,
           });
         }
       }

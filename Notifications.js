@@ -287,7 +287,36 @@ function NotificationItem({ n, onGoTo, onMarkRead, onDelete }) {
         }
       }
       if (!n.read) onMarkRead?.();
-      onGoTo?.(target, { refId: n.refId, notifId: n.id, type: n.type });
+      
+      // Enhanced navigation with scroll target and highlight data
+      const navigationData = {
+        refId: n.refId,
+        notifId: n.id,
+        type: n.type,
+        // Add scroll and highlight information
+        scrollTarget: n.refId, // ID of the item to scroll to
+        highlightDuration: 3000, // How long to highlight (3 seconds)
+        scrollBehavior: 'smooth', // Smooth scrolling animation
+        // Additional context for better targeting
+        applicantName: n.applicantName,
+        barangay: n.barangay,
+        municipality: n.municipality,
+        // Auto-scroll configuration
+        autoScroll: {
+          enabled: true,
+          targetId: n.refId,
+          offset: 100, // Offset from top when scrolling to target
+          behavior: 'smooth',
+          highlight: {
+            enabled: true,
+            duration: 3000,
+            color: '#25A18E20', // Light teal background
+            borderColor: '#25A18E',
+          }
+        }
+      };
+      
+      onGoTo?.(target, navigationData);
     } catch (err) {
       console.error('Failed to open notification target:', err);
       // Fallback: still prevent navigation if uncertain, but mark read to avoid re-alert loops
@@ -488,3 +517,51 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
+// Export utility functions for use in target screens
+export const scrollToNotificationTarget = (scrollViewRef, targetId, options = {}) => {
+  const {
+    offset = 100,
+    behavior = 'smooth',
+    timeout = 500
+  } = options;
+
+  setTimeout(() => {
+    // Find the target element by testID or other identifier
+    const targetElement = scrollViewRef.current?.querySelector(`[data-notification-target="${targetId}"]`);
+    
+    if (targetElement && scrollViewRef.current) {
+      const elementPosition = targetElement.offsetTop - offset;
+      
+      if (scrollViewRef.current.scrollTo) {
+        scrollViewRef.current.scrollTo({
+          y: elementPosition,
+          animated: behavior === 'smooth'
+        });
+      } else if (scrollViewRef.current.scrollToOffset) {
+        // For FlatList
+        scrollViewRef.current.scrollToOffset({
+          offset: elementPosition,
+          animated: behavior === 'smooth'
+        });
+      }
+    }
+  }, timeout);
+};
+
+export const highlightNotificationTarget = (targetId, options = {}) => {
+  const {
+    duration = 3000,
+    color = '#25A18E20',
+    borderColor = '#25A18E'
+  } = options;
+
+  // This would be implemented in the target screen component
+  // Return a style object that can be applied conditionally
+  return {
+    backgroundColor: color,
+    borderColor: borderColor,
+    borderWidth: 2,
+    borderRadius: 8,
+  };
+};

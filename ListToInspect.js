@@ -41,8 +41,7 @@ export default function ListToInspect({ highlightApplicantId }) {
   useEffect(() => {
     if (highlightApplicantId) {
       setHighlightId(highlightApplicantId);
-      const t = setTimeout(() => setHighlightId(null), 6000);
-      return () => clearTimeout(t);
+      // Removed timeout - highlight will persist until user interaction
     }
   }, [highlightApplicantId]);
 
@@ -129,7 +128,15 @@ export default function ListToInspect({ highlightApplicantId }) {
       });
       
       console.log('✅ All applicants needing inspection:', applicantsNeedingInspection.length);
-      setApplicants(applicantsNeedingInspection);
+      
+      // Sort applicants by creation date to ensure queue-like behavior (oldest first)
+      const sortedApplicants = applicantsNeedingInspection.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt.seconds * 1000) : new Date(0);
+        const dateB = b.createdAt ? new Date(b.createdAt.seconds * 1000) : new Date(0);
+        return dateA - dateB; // Ascending order - oldest first (FIFO queue)
+      });
+      
+      setApplicants(sortedApplicants);
       
     } catch (error) {
       console.error('❌ Error fetching all applicants:', error);
@@ -191,7 +198,15 @@ export default function ListToInspect({ highlightApplicantId }) {
         });
         
         console.log('✅ Applicants needing inspection:', applicantsList.length);
-        setApplicants(applicantsList);
+        
+        // Sort applicants by creation date to ensure queue-like behavior (oldest first)
+        const sortedApplicants = applicantsList.sort((a, b) => {
+          const dateA = a.createdAt ? new Date(a.createdAt.seconds * 1000) : new Date(0);
+          const dateB = b.createdAt ? new Date(b.createdAt.seconds * 1000) : new Date(0);
+          return dateA - dateB; // Ascending order - oldest first (FIFO queue)
+        });
+        
+        setApplicants(sortedApplicants);
         
       } catch (queryError) {
         console.error('❌ Query error:', queryError);
@@ -383,7 +398,13 @@ export default function ListToInspect({ highlightApplicantId }) {
                   styles.applicantCard,
                   applicant.id === highlightId ? { backgroundColor: '#FFF3CD', borderWidth: 1, borderColor: '#FFC107' } : null,
                 ]}
-                onPress={() => handleApplicantSelect(applicant)}
+                onPress={() => {
+                  // Clear highlight if clicking on the highlighted item
+                  if (applicant.id === highlightId) {
+                    setHighlightId(null);
+                  }
+                  handleApplicantSelect(applicant);
+                }}
                 activeOpacity={0.7}
               >
                 <View style={styles.applicantHeader}>
