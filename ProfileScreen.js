@@ -36,6 +36,7 @@ export default function ProfileScreen({ navigation }) {
             municipality: data.municipality || '',
             barangay: data.barangay || '',
             status: data.status || '',
+            additionalMunicipalities: Array.isArray(data.additionalMunicipalities) ? data.additionalMunicipalities : undefined,
           });
           setError('');
         }
@@ -61,7 +62,20 @@ export default function ProfileScreen({ navigation }) {
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   };
 
-  const roleText = user?.municipality ? `Field Staff in ${user.municipality}` : '';
+  let roleText = '';
+  if (user?.municipality) {
+    const muniList = [user.municipality];
+    if (user.additionalMunicipalities && user.additionalMunicipalities.length > 0) {
+      muniList.push(...user.additionalMunicipalities);
+    }
+    if (muniList.length === 1) {
+      roleText = `Field Staff in ${muniList[0]}`;
+    } else if (muniList.length === 2) {
+      roleText = `Field Staff in ${muniList[0]} and ${muniList[1]}`;
+    } else {
+      roleText = `Field Staff in ${muniList.slice(0, -1).join(', ')} and ${muniList[muniList.length - 1]}`;
+    }
+  }
   const addressText = user ? `${user.barangay || ''}${user.barangay && user.municipality ? ', ' : ''}${user.municipality || ''}` : '';
   const isActive = (user?.status || '').toLowerCase() === 'active';
 
@@ -98,16 +112,25 @@ export default function ProfileScreen({ navigation }) {
                 <Text style={styles.statValue}>{user?.userId || ''}</Text>
               </View>
             </View>
-            <View style={styles.infoSection}>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Email</Text>
-                <Text style={styles.infoValue}>{user?.email || ''}</Text>
+            <View style={[styles.infoSectionMatchCard, {flex: 1, alignSelf: 'stretch'}]}> 
+              <View style={styles.infoRowVerticalUnderline}>
+                <Text style={styles.infoLabelMatchCard}>Email</Text>
+                <Text style={styles.infoValueMatchCardVertical}>{user?.email || ''}</Text>
               </View>
-              <View style={styles.infoDivider} />
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Address</Text>
-                <Text style={styles.infoValue}>{addressText || ''}</Text>
+              <View style={styles.infoRowVerticalUnderline}>
+                <Text style={styles.infoLabelMatchCard}>Address</Text>
+                <Text style={styles.infoValueMatchCardVertical}>{addressText || ''}</Text>
               </View>
+              {user?.additionalMunicipalities && user.additionalMunicipalities.length > 0 && (
+                <View style={styles.infoRowVerticalUnderlineLast}>
+                  <Text style={styles.infoLabelMatchCard}>Additional Municipalities</Text>
+                  <Text style={styles.infoValueMatchCardVertical}>
+                    {user.additionalMunicipalities.length === 1
+                      ? user.additionalMunicipalities[0]
+                      : user.additionalMunicipalities.slice(0, -1).join(', ') + ' and ' + user.additionalMunicipalities[user.additionalMunicipalities.length - 1]}
+                  </Text>
+                </View>
+              )}
             </View>
           </>
         )}
@@ -117,6 +140,111 @@ export default function ProfileScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  infoRowVerticalUnderline: {
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAEAEA',
+  },
+  infoRowVerticalUnderlineLast: {
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+  },
+  infoValueMatchCardVertical: {
+    color: '#222',
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 2,
+    marginBottom: 6,
+    textAlign: 'left',
+  },
+  infoRowHorizontalUnderline: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAEAEA',
+  },
+  infoSectionMatchCard: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    flexWrap: 'wrap',
+    flex: 1,
+    alignSelf: 'stretch',
+    shadowColor: '#25A18E',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  infoRowHorizontal: {
+  width: '100%',
+  alignSelf: 'stretch',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  infoLabelMatchCard: {
+    color: '#6b7280',
+    fontSize: 15,
+    fontWeight: '500',
+    flexShrink: 1,
+    marginRight: 8,
+    maxWidth: '45%',
+    flexWrap: 'nowrap',
+    width: 'auto',
+  },
+  infoValueMatchCard: {
+    color: '#222',
+    fontSize: 15,
+    fontWeight: '700',
+    flex: 1,
+    flexWrap: 'wrap',
+    textAlign: 'right',
+    minWidth: 0,
+    maxWidth: '55%',
+  },
+  infoDividerMatchCard: {
+    height: 1,
+    backgroundColor: '#EAEAEA',
+    width: '100%',
+  },
+  infoLabelStrong: {
+    color: '#222',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 2,
+    textAlign: 'left',
+  },
+  infoValueStrong: {
+    color: '#222',
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 6,
+    textAlign: 'left',
+  },
+  infoSpacer: {
+    height: 8,
+  },
+  infoRowVertical: {
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    flexWrap: 'wrap',
+  },
   safeArea: {
     flex: 1,
     backgroundColor: '#e6f4f1',
@@ -124,7 +252,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   card: {
-    width: 340,
+    minWidth: 340,
+    maxWidth: '90%',
+    width: 'auto',
     backgroundColor: '#F8FFFE',
     borderRadius: 28,
     paddingVertical: 32,
@@ -211,20 +341,30 @@ const styles = StyleSheet.create({
   },
   infoSection: {
     width: '100%',
+    minWidth: 260,
+    maxWidth: 340,
     backgroundColor: '#fff',
-    borderRadius: 14,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
     marginBottom: 18,
     borderWidth: 1,
     borderColor: '#E0E0E0',
+    flexWrap: 'wrap',
+    alignSelf: 'center',
+    shadowColor: '#25A18E',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   infoRow: {
     width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingVertical: 10,
+    flexWrap: 'wrap',
   },
   infoDivider: {
     height: 1,
@@ -234,11 +374,19 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 14,
     fontWeight: '500',
+    flexShrink: 0,
+    marginRight: 8,
+    maxWidth: '45%',
   },
   infoValue: {
     color: '#222',
     fontSize: 15,
     fontWeight: '600',
+    flex: 1,
+    flexWrap: 'wrap',
+    textAlign: 'left',
+    minWidth: 0,
+    maxWidth: '55%',
   },
   badgeRow: {
     flexDirection: 'row',

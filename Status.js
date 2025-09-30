@@ -51,6 +51,9 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
   const [numCalf, setNumCalf] = useState('');
   const [soldAmount, setSoldAmount] = useState('');
   const [soldDate, setSoldDate] = useState('');
+  const [deadDate, setDeadDate] = useState('');
+  const [surrenderedDate, setSurrenderedDate] = useState('');
+  const [monitoringDate, setMonitoringDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditingBeneficiary, setIsEditingBeneficiary] = useState(false);
   const [isLoadingBeneficiary, setIsLoadingBeneficiary] = useState(false);
@@ -187,6 +190,9 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
         setNumCalf(statusData.numCalf || '');
         setSoldAmount(statusData.soldAmount || '');
         setSoldDate(statusData.soldDate || '');
+        setDeadDate(statusData.deadDate || '');
+        setSurrenderedDate(statusData.surrenderedDate || '');
+        setMonitoringDate(statusData.monitoringDate || '');
         
         console.log('Existing status data loaded:', statusData);
       }
@@ -196,27 +202,43 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
   };
 
   const toggleStatus = (key) => {
-    if (key === 'dead') {
-      if (selectedStatus.includes('dead')) {
-        // Allow unchecking dead
-        setSelectedStatus(selectedStatus.filter(k => k !== 'dead'));
-      } else {
-        // If dead is being selected, clear all other statuses
-        setSelectedStatus(['dead']);
-        setSelectedHealth(''); // Clear health status when dead is selected
+    if (selectedStatus.includes('cannot_found')) {
+      // If unknown is selected, only allow unchecking it
+      if (key === 'cannot_found') {
+        setSelectedStatus([]);
       }
+      return;
+    }
+    if (selectedStatus.includes('dead')) {
+      // If dead is selected, only allow unchecking it
+      if (key === 'dead') {
+        setSelectedStatus([]);
+      }
+      return;
+    }
+    if (selectedStatus.includes('sold')) {
+      // If sold is selected, only allow unchecking it
+      if (key === 'sold') {
+        setSelectedStatus(selectedStatus.filter(k => k !== 'sold'));
+      }
+      return;
+    }
+    if (selectedStatus.includes('existing')) {
+      // Only allow toggling enabled checkboxes
+      if (['pregnant', 'surrendered', 'sold', 'with_calf', 'existing'].includes(key)) {
+        if (selectedStatus.includes(key)) {
+          setSelectedStatus(selectedStatus.filter(k => k !== key));
+        } else {
+          setSelectedStatus([...selectedStatus, key]);
+        }
+      }
+      return;
+    }
+    // Default toggle
+    if (selectedStatus.includes(key)) {
+      setSelectedStatus(selectedStatus.filter(k => k !== key));
     } else {
-      // If other status is being selected
-      if (selectedStatus.includes(key)) {
-        // Allow unchecking any status
-        setSelectedStatus(prev => prev.filter(k => k !== key));
-      } else {
-        // If selecting a new status, remove dead if it exists
-        setSelectedStatus((prev) => {
-          const newStatus = prev.filter((k) => k !== 'dead');
-          return [...newStatus, key];
-        });
-      }
+      setSelectedStatus([...selectedStatus, key]);
     }
   };
 
@@ -233,17 +255,36 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
   };
 
   const isStatusDisabled = (key) => {
-    if (key === 'dead') {
-      // Dead is disabled if any other status is selected (but can still be unchecked)
-      return selectedStatus.length > 0 && !selectedStatus.includes('dead');
-    } else {
-      // Other statuses are disabled if dead is selected (but can still be unchecked)
-      return selectedStatus.includes('dead');
+    if (selectedStatus.includes('cannot_found')) {
+      // Unknown disables all others
+      return !selectedStatus.includes(key);
     }
+    if (selectedStatus.includes('existing')) {
+      // Only pregnant, surrendered, sold, with calf are enabled
+      return !['pregnant', 'surrendered', 'sold', 'with_calf', 'existing'].includes(key);
+    }
+    if (selectedStatus.includes('pregnant')) {
+      // Dead, unknown disabled
+      return ['dead', 'cannot_found'].includes(key);
+    }
+    if (selectedStatus.includes('surrendered')) {
+      // Dead disabled
+      return key === 'dead';
+    }
+    if (selectedStatus.includes('sold')) {
+      // Dead, pregnant, surrendered, unknown, with calf disabled
+      return ['dead', 'pregnant', 'surrendered', 'cannot_found', 'with_calf'].includes(key);
+    }
+    if (selectedStatus.includes('dead')) {
+      // All others disabled
+      return key !== 'dead';
+    }
+    return false;
   };
 
   const isHealthDisabled = () => {
-    return selectedStatus.includes('dead');
+    // Health is disabled if dead or unknown is selected
+    return selectedStatus.includes('dead') || selectedStatus.includes('cannot_found');
   };
 
   const handleEditBeneficiary = () => {
@@ -266,8 +307,16 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
       Alert.alert('Validation Error', 'Please select at least one status option.');
       return;
     }
-    if (!selectedStatus.includes('dead') && !selectedHealth) {
+    if (!selectedStatus.includes('dead') && !selectedStatus.includes('cannot_found') && !selectedHealth) {
       Alert.alert('Validation Error', 'Please select a health status.');
+      return;
+    }
+    if ((selectedStatus.includes('dead') && !deadDate) || (selectedStatus.includes('surrendered') && !surrenderedDate)) {
+      Alert.alert('Validation Error', 'Please provide date for Dead/Surrendered status.');
+      return;
+    }
+    if (!monitoringDate) {
+      Alert.alert('Validation Error', 'Please provide monitoring date.');
       return;
     }
     
@@ -295,15 +344,14 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
         statusOptions: selectedStatus,
         healthStatus: selectedHealth || null,
         remarks: remarks.trim() || null,
-        
-        // Additional details based on selected status
         monthsPregnant: selectedStatus.includes('pregnant') ? monthsPregnant.trim() || null : null,
         calfAge: selectedStatus.includes('with_calf') ? calfAge.trim() || null : null,
         numCalf: selectedStatus.includes('with_calf') ? numCalf.trim() || null : null,
         soldAmount: selectedStatus.includes('sold') ? soldAmount.trim() || null : null,
         soldDate: selectedStatus.includes('sold') ? soldDate.trim() || null : null,
-        
-        // Metadata
+        deadDate: selectedStatus.includes('dead') ? deadDate.trim() || null : null,
+        surrenderedDate: selectedStatus.includes('surrendered') ? surrenderedDate.trim() || null : null,
+        monitoringDate: monitoringDate.trim() || null,
         cardUid: scannedUID,
         submittedAt: serverTimestamp(),
         verificationStatus: 'pending',
@@ -573,47 +621,73 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
                 const isSelected = selectedStatus.includes(opt.key);
                 const isDisabled = isStatusDisabled(opt.key);
                 return (
-              <TouchableOpacity
-                key={opt.key}
-                  style={[
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[
                       styles.statusOptionCard,
                       isSelected && styles.statusOptionCardSelected,
                       isDisabled && styles.statusOptionCardDisabled
                     ]}
-                    onPress={() => toggleStatus(opt.key)}
+                    onPress={() => !isDisabled && toggleStatus(opt.key)}
                     activeOpacity={0.7}
+                    disabled={isDisabled}
                   >
                     <View style={styles.statusOptionContent}>
-                      <View style={[
-                        styles.statusIconContainer,
-                        isDisabled && styles.statusIconContainerDisabled
-                      ]}>
+                      <View style={[styles.statusIconContainer, isDisabled && styles.statusIconContainerDisabled]}>
                         <Ionicons 
                           name={opt.icon} 
                           size={20} 
                           color={isDisabled ? colors.disabled : (isSelected ? colors.primary : colors.textLight)} 
                         />
                       </View>
-                      <Text style={[
-                        styles.statusOptionLabel,
-                        isSelected && styles.statusOptionLabelSelected,
-                        isDisabled && styles.statusOptionLabelDisabled
-                      ]}>
-                  {opt.label}
-                </Text>
-                      <View style={[
-                        styles.statusCheckbox,
-                        isSelected && styles.statusCheckboxSelected,
-                        isDisabled && styles.statusCheckboxDisabled
-                      ]}>
+                      <Text style={[styles.statusOptionLabel, isSelected && styles.statusOptionLabelSelected, isDisabled && styles.statusOptionLabelDisabled]}>
+                        {opt.label}
+                      </Text>
+                      <View style={[styles.statusCheckbox, isSelected && styles.statusCheckboxSelected, isDisabled && styles.statusCheckboxDisabled]}>
                         {isSelected && (
                           <Ionicons name="checkmark" size={12} color={colors.white} />
                         )}
                       </View>
                     </View>
-              </TouchableOpacity>
+                  </TouchableOpacity>
                 );
               })}
+            </View>
+            {/* Date fields for dead and surrendered */}
+            {selectedStatus.includes('dead') && (
+              <View style={styles.formCard}>
+                <Text style={styles.formCardTitle}>Date of Death</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter date of death (YYYY-MM-DD)"
+                  placeholderTextColor={colors.textLight}
+                  value={deadDate}
+                  onChangeText={setDeadDate}
+                />
+              </View>
+            )}
+            {selectedStatus.includes('surrendered') && (
+              <View style={styles.formCard}>
+                <Text style={styles.formCardTitle}>Date Surrendered</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter date surrendered (YYYY-MM-DD)"
+                  placeholderTextColor={colors.textLight}
+                  value={surrenderedDate}
+                  onChangeText={setSurrenderedDate}
+                />
+              </View>
+            )}
+            {/* Monitoring date field */}
+            <View style={styles.formCard}>
+              <Text style={styles.formCardTitle}>Monitoring Date</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter monitoring date (YYYY-MM-DD)"
+                placeholderTextColor={colors.textLight}
+                value={monitoringDate}
+                onChangeText={setMonitoringDate}
+              />
             </View>
           </View>
 

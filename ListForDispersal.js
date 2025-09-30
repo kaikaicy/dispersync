@@ -45,6 +45,7 @@ export default function ListForDispersal({ highlightScheduleId }) {
   }, [highlightScheduleId]);
 
   const [staffMunicipality, setStaffMunicipality] = useState(null);
+  const [additionalMunicipalities, setAdditionalMunicipalities] = useState([]);
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
@@ -52,19 +53,23 @@ export default function ListForDispersal({ highlightScheduleId }) {
       try {
         if (!user) {
           setStaffMunicipality(null);
+          setAdditionalMunicipalities([]);
           setAuthReady(true);
           return;
         }
-        // read staff profile to get municipality
+        // read staff profile to get municipality and additionalMunicipalities
         const staffRef = collection(db, 'staff');
         const q = query(staffRef, where(documentId(), '==', user.uid));
         const snap = await getDocs(q);
         const data = snap.docs[0]?.data() || {};
         const muni = data.municipality || data.Municipality || data?.location?.municipality || null;
         setStaffMunicipality(typeof muni === 'string' ? muni : null);
+        const additional = data.additionalMunicipalities || [];
+        setAdditionalMunicipalities(Array.isArray(additional) ? additional : []);
       } catch (e) {
         console.error('Load staff municipality failed:', e);
         setStaffMunicipality(null);
+        setAdditionalMunicipalities([]);
       } finally {
         setAuthReady(true);
       }
@@ -151,11 +156,12 @@ export default function ListForDispersal({ highlightScheduleId }) {
   }, []);
   
 
+  // Combine main and additional municipalities for filtering
   const municipalityFiltered = useMemo(() => {
-    if (!staffMunicipality) return rows;
-    const target = String(staffMunicipality).toLowerCase().trim();
-    return rows.filter((b) => String(b.municipality || '').toLowerCase().trim() === target);
-  }, [rows, staffMunicipality]);
+    const allMunicipalities = [staffMunicipality, ...additionalMunicipalities.filter(m => !!m)].map(m => String(m).toLowerCase().trim());
+    if (allMunicipalities.length === 0) return rows;
+    return rows.filter((b) => allMunicipalities.includes(String(b.municipality || '').toLowerCase().trim()));
+  }, [rows, staffMunicipality, additionalMunicipalities]);
 
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
@@ -165,7 +171,9 @@ export default function ListForDispersal({ highlightScheduleId }) {
     );
   }, [municipalityFiltered, search]);
 
-  const headerPlace = staffMunicipality && typeof staffMunicipality === 'string' ? staffMunicipality : 'your area';
+  const headerPlace = staffMunicipality && typeof staffMunicipality === 'string'
+    ? [staffMunicipality, ...additionalMunicipalities.filter(m => !!m)].join(', ')
+    : 'your area';
 
   // Colors and styles adapted from ListToInspect list view for consistent UI
   const colors = {

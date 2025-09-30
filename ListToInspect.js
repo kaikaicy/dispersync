@@ -28,6 +28,7 @@ export default function ListToInspect({ highlightApplicantId }) {
   const [image, setImage] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [userMunicipality, setUserMunicipality] = useState('');
+  const [additionalMunicipalities, setAdditionalMunicipalities] = useState([]);
   const [applicants, setApplicants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedApplicant, setSelectedApplicant] = useState(null);
@@ -73,25 +74,24 @@ export default function ListToInspect({ highlightApplicantId }) {
     return () => unsubscribe();
   }, []);
 
-  // Fetch user's municipality from staff collection
+  // Fetch user's municipality and additionalMunicipalities from staff collection
   const fetchUserMunicipality = async (userId) => {
     try {
       console.log('👤 Fetching staff profile for user ID:', userId);
-      
       const staffDoc = await getDoc(doc(db, 'staff', userId));
       if (staffDoc.exists()) {
         const staffData = staffDoc.data();
         console.log('📋 Staff data found:', staffData);
-        
         const municipality = staffData.municipality || staffData.municipalityName || staffData.area || '';
-        console.log('🏘️ Staff municipality:', municipality);
-        
+        const additional = staffData.additionalMunicipalities || [];
         setUserMunicipality(municipality);
-        if (municipality) {
-          await fetchApplicantsByMunicipality(municipality);
+        setAdditionalMunicipalities(Array.isArray(additional) ? additional : []);
+        // Combine main and additional municipalities
+        const allMunicipalities = [municipality, ...((Array.isArray(additional) ? additional : []).filter(m => !!m))].filter(m => !!m);
+        if (allMunicipalities.length > 0) {
+          await fetchApplicantsByMunicipalities(allMunicipalities);
         } else {
           console.log('⚠️ No municipality found for staff, showing all applicants');
-          // If no municipality, show all applicants that need inspection
           await fetchAllApplicantsNeedingInspection();
         }
       } else {
@@ -143,93 +143,54 @@ export default function ListToInspect({ highlightApplicantId }) {
     }
   };
 
-  // Fetch applicants that need inspection from the same municipality
-  const fetchApplicantsByMunicipality = async (municipality) => {
+  // Fetch applicants that need inspection from multiple municipalities
+  const fetchApplicantsByMunicipalities = async (municipalities) => {
     try {
       setLoading(true);
-      
-      console.log('🔍 Searching for applicants in municipality:', municipality);
-      
-      // First, let's get ALL applicants to see what fields they actually have
+      console.log('🔍 Searching for applicants in municipalities:', municipalities);
       const applicantsRef = collection(db, 'applicants');
       const allApplicantsQuery = query(applicantsRef);
       const allApplicantsSnapshot = await getDocs(allApplicantsQuery);
-      
       console.log('📊 Total applicants found:', allApplicantsSnapshot.size);
-      
       // Log the first few applicants to see their structure
-      allApplicantsSnapshot.forEach((doc, index) => {
-        if (index < 3) { // Only log first 3 for debugging
+      let debugCount = 0;
+      allApplicantsSnapshot.forEach((doc) => {
+        if (debugCount < 3) {
           const data = doc.data();
-          console.log(`📋 Applicant ${index + 1}:`, {
+          console.log(`📋 Applicant ${debugCount + 1}:`, {
             id: doc.id,
             name: data.fullName || data.name || 'N/A',
             municipality: data.municipality || data.municipalityName || data.area || 'N/A',
             status: data.inspectionStatus || data.status || data.inspection || 'N/A',
             address: data.address || 'N/A'
           });
+          debugCount++;
         }
       });
-      
-      // Now try the actual query with the municipality filter
-      let q;
-      try {
-        q = query(
-          applicantsRef,
-          where('municipality', '==', municipality)
-        );
-        
-        const municipalitySnapshot = await getDocs(q);
-        console.log('🏘️ Applicants in municipality:', municipalitySnapshot.size);
-        
-        // Filter by inspection status in memory (more flexible)
-        const applicantsList = [];
-        municipalitySnapshot.forEach((doc) => {
-          const data = doc.data();
-          const status = data.inspectionStatus || data.status || data.inspection || 'pending';
-          
-          // Check if applicant needs inspection (pending, not started, etc.)
-          if (status === 'pending' || status === 'not started' || status === 'pending inspection' || status === '') {
-            applicantsList.push({
-              id: doc.id,
-              ...data
-            });
-          }
-        });
-        
-        console.log('✅ Applicants needing inspection:', applicantsList.length);
-        
-        // Sort applicants by creation date to ensure queue-like behavior (oldest first)
-        const sortedApplicants = applicantsList.sort((a, b) => {
-          const dateA = a.createdAt ? new Date(a.createdAt.seconds * 1000) : new Date(0);
-          const dateB = b.createdAt ? new Date(b.createdAt.seconds * 1000) : new Date(0);
-          return dateA - dateB; // Ascending order - oldest first (FIFO queue)
-        });
-        
-        setApplicants(sortedApplicants);
-        
-      } catch (queryError) {
-        console.error('❌ Query error:', queryError);
-        // Fallback: get all applicants and filter in memory
-        const allApplicants = [];
-        allApplicantsSnapshot.forEach((doc) => {
-          const data = doc.data();
-          const applicantMunicipality = data.municipality || data.municipalityName || data.area || '';
-          const status = data.inspectionStatus || data.status || data.inspection || 'pending';
-          
-          if (applicantMunicipality.toLowerCase().includes(municipality.toLowerCase()) && 
-              (status === 'pending' || status === 'not started' || status === 'pending inspection' || status === '')) {
-            allApplicants.push({
-              id: doc.id,
-              ...data
-            });
-          }
-        });
-        
-        console.log('🔄 Fallback filtering found:', allApplicants.length, 'applicants');
-        setApplicants(allApplicants);
-      }
-      
+      // Filter applicants by municipalities and inspection status
+      const applicantsList = [];
+      allApplicantsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        const applicantMunicipality = (data.municipality || data.municipalityName || data.area || '').toLowerCase();
+        const status = data.inspectionStatus || data.status || data.inspection || 'pending';
+        if (
+          municipalities.some(m => applicantMunicipality === m.toLowerCase()) &&
+          (status === 'pending' || status === 'not started' || status === 'pending inspection' || status === '')
+        ) {
+          applicantsList.push({
+            id: doc.id,
+            ...data
+          });
+        }
+      });
+      console.log('✅ Applicants needing inspection:', applicantsList.length);
+      // Sort applicants by creation date to ensure queue-like behavior (oldest first)
+      const sortedApplicants = applicantsList.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt.seconds * 1000) : new Date(0);
+        const dateB = b.createdAt ? new Date(b.createdAt.seconds * 1000) : new Date(0);
+        return dateA - dateB;
+      });
+      setApplicants(sortedApplicants);
     } catch (error) {
       console.error('❌ Error fetching applicants:', error);
       Alert.alert('Error', 'Failed to fetch applicants');
@@ -344,7 +305,9 @@ export default function ListToInspect({ highlightApplicantId }) {
         <View>
           <Text style={{ fontWeight: 'bold', color: '#25A18E', fontSize: 15 }}>OLDMS</Text>
           <Text style={{ color: '#888', fontSize: 13 }}>
-            {userMunicipality ? `Municipality: ${userMunicipality}` : 'Loading...'}
+            {userMunicipality
+              ? `Municipalities: ${[userMunicipality, ...additionalMunicipalities.filter(m => !!m)].join(', ')}`
+              : 'Loading...'}
           </Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
@@ -360,8 +323,9 @@ export default function ListToInspect({ highlightApplicantId }) {
               marginTop: 4
             }}
             onPress={() => {
-              if (userMunicipality) {
-                fetchApplicantsByMunicipality(userMunicipality);
+              const allMunicipalities = [userMunicipality, ...additionalMunicipalities.filter(m => !!m)].filter(m => !!m);
+              if (allMunicipalities.length > 0) {
+                fetchApplicantsByMunicipalities(allMunicipalities);
               } else {
                 fetchAllApplicantsNeedingInspection();
               }

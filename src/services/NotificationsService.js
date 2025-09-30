@@ -8,32 +8,45 @@ function safeEquals(a, b) {
 // Helper function to get all staff members assigned to a specific municipality
 async function getStaffByMunicipality(municipality) {
   try {
+    // Query staff with main municipality match
     const staffQuery = query(
       collection(db, 'staff'),
       where('municipality', '==', municipality)
     );
     const staffSnapshot = await getDocs(staffQuery);
-    
-    // Also check alternative municipality field names
+
+    // Query staff with alternative field name
     const staffQueryAlt = query(
       collection(db, 'staff'),
       where('Municipality', '==', municipality)
     );
     const staffSnapshotAlt = await getDocs(staffQueryAlt);
-    
+
+    // Query staff whose additionalMunicipalities array contains the municipality
+    const staffQueryAdditional = query(
+      collection(db, 'staff'),
+      where('additionalMunicipalities', 'array-contains', municipality)
+    );
+    const staffSnapshotAdditional = await getDocs(staffQueryAdditional);
+
     // Combine results and remove duplicates
     const allStaff = new Map();
-    
+
     staffSnapshot.docs.forEach(doc => {
       const data = doc.data();
       allStaff.set(doc.id, { uid: doc.id, ...data });
     });
-    
+
     staffSnapshotAlt.docs.forEach(doc => {
       const data = doc.data();
       allStaff.set(doc.id, { uid: doc.id, ...data });
     });
-    
+
+    staffSnapshotAdditional.docs.forEach(doc => {
+      const data = doc.data();
+      allStaff.set(doc.id, { uid: doc.id, ...data });
+    });
+
     return Array.from(allStaff.values());
   } catch (error) {
     console.error('Error fetching staff by municipality:', error);

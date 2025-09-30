@@ -264,11 +264,19 @@ function NotificationItem({ n, onGoTo, onMarkRead, onDelete }) {
   const icon = n.type === 'inspect' ? 'clipboard-outline'
     : n.type === 'beneficiaries' ? 'people-outline'
     : n.type === 'inspect_rejected' ? 'close-circle-outline'
+    : n.title?.toLowerCase().includes('inspection form approved') ? 'checkmark-done-outline'
     : 'trail-sign-outline';
-  const target = n.type === 'inspect' ? 'inspect'
-    : n.type === 'beneficiaries' ? 'beneficiaries'
-    : n.type === 'inspect_rejected' ? 'inspect'
-    : 'for_dispersal';
+
+  // If the notification is for inspection form approved, always go to for_dispersal
+  let target;
+  if (n.title?.toLowerCase().includes('inspection form approved')) {
+    target = 'for_dispersal';
+  } else {
+    target = n.type === 'inspect' ? 'inspect'
+      : n.type === 'beneficiaries' ? 'beneficiaries'
+      : n.type === 'inspect_rejected' ? 'inspect'
+      : 'for_dispersal';
+  }
 
   const handleOpen = async () => {
     try {
