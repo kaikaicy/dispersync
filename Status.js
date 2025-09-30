@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { db } from './src/config/firebase';
-import { collection, query, where, getDocs, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, updateDoc, doc, serverTimestamp, Timestamp } from 'firebase/firestore';
+
 
 const livestockDetails = {
   type: 'Swine',
@@ -319,60 +320,85 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
       Alert.alert('Validation Error', 'Please provide monitoring date.');
       return;
     }
-    
     if (!beneficiary.id) {
-      console.log('Beneficiary data:', beneficiary);
-      console.log('Beneficiary ID:', beneficiary.id);
       Alert.alert('Error', 'No beneficiary data found. Please scan a valid card.');
       return;
     }
-    
+  
+    // helpers
+    const toTS = (s) => {
+      if (!s) return null;
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : Timestamp.fromDate(d);
+    };
+    const numOrNull = (v) => {
+      if (v === '' || v === null || v === undefined) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+  
+    // numeric parsing
+    const monthsPregnantNum = selectedStatus.includes('pregnant') ? numOrNull(monthsPregnant) : null;
+    const calfAgeNum = selectedStatus.includes('with_calf') ? numOrNull(calfAge) : null;
+    const numCalfNum = selectedStatus.includes('with_calf') ? numOrNull(numCalf) : null;
+    const soldAmountNum = selectedStatus.includes('sold') ? numOrNull(soldAmount) : null;
+  
+    // beneficiary 30% share
+    const beneficiaryShare =
+      soldAmountNum !== null ? Math.round(soldAmountNum * 0.3 * 100) / 100 : null;
+  
     setIsSubmitting(true);
-    
     try {
-      // Check if status document already exists for this beneficiary and card UID
+      // Check if a status doc already exists for this beneficiary + card UID
       const existingStatusQuery = query(
         collection(db, 'status'),
         where('beneficiaryId', '==', beneficiary.id),
         where('cardUid', '==', scannedUID)
       );
       const existingStatusSnap = await getDocs(existingStatusQuery);
-      
-      // Prepare status data
-      const statusData = {
+  
+      // Prepare payload (dates saved as Timestamp when valid, otherwise null)
+      const baseData = {
         beneficiaryId: beneficiary.id,
         statusOptions: selectedStatus,
         healthStatus: selectedHealth || null,
         remarks: remarks.trim() || null,
-        monthsPregnant: selectedStatus.includes('pregnant') ? monthsPregnant.trim() || null : null,
-        calfAge: selectedStatus.includes('with_calf') ? calfAge.trim() || null : null,
-        numCalf: selectedStatus.includes('with_calf') ? numCalf.trim() || null : null,
-        soldAmount: selectedStatus.includes('sold') ? soldAmount.trim() || null : null,
-        soldDate: selectedStatus.includes('sold') ? soldDate.trim() || null : null,
-        deadDate: selectedStatus.includes('dead') ? deadDate.trim() || null : null,
-        surrenderedDate: selectedStatus.includes('surrendered') ? surrenderedDate.trim() || null : null,
-        monitoringDate: monitoringDate.trim() || null,
+  
+        monthsPregnant: monthsPregnantNum,
+        calfAge: calfAgeNum,
+        numCalf: numCalfNum,
+  
+        soldAmount: soldAmountNum,
+        beneficiaryShare, // <-- ✅ SAVE 30% SHARE
+        soldDate: selectedStatus.includes('sold') ? toTS(soldDate) : null,
+  
+        deadDate: selectedStatus.includes('dead') ? toTS(deadDate) : null,
+        surrenderedDate: selectedStatus.includes('surrendered') ? toTS(surrenderedDate) : null,
+        monitoringDate: toTS(monitoringDate),
+  
         cardUid: scannedUID,
-        submittedAt: serverTimestamp(),
         verificationStatus: 'pending',
       };
-      
-      let docRef;
+  
       if (!existingStatusSnap.empty) {
-        // Update existing document
+        // Update existing doc; keep original submittedAt, bump updatedAt
         const existingDoc = existingStatusSnap.docs[0];
-        docRef = existingDoc.ref;
-        await updateDoc(docRef, statusData);
+        await updateDoc(existingDoc.ref, {
+          ...baseData,
+          updatedAt: serverTimestamp(),
+        });
         console.log('Status updated successfully for document ID:', existingDoc.id);
       } else {
-        // Create new document
-        docRef = await addDoc(collection(db, 'status'), statusData);
-        console.log('Status created successfully with ID:', docRef.id);
+        // Create new doc with submittedAt
+        await addDoc(collection(db, 'status'), {
+          ...baseData,
+          submittedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
       }
-      
+  
       Alert.alert('Success', 'Status submitted successfully for verification!');
-      onBackToTransactions();
-      
+      onBackToTransactions && onBackToTransactions();
     } catch (error) {
       console.error('Error saving status:', error);
       Alert.alert('Error', 'Failed to submit status. Please try again.');
@@ -380,6 +406,7 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
       setIsSubmitting(false);
     }
   };
+  
 
   const handleCullingPress = () => {
     console.log('Culling button pressed - navigating to Cull screen');
