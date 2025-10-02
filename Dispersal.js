@@ -18,6 +18,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 
 // ⬇️ changed: include uploadBytesResumable
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import * as FileSystem from 'expo-file-system';
 
 // helper: calculate age from Firestore Timestamp
 const calculateAge = (birthdayTs) => {
@@ -36,19 +37,20 @@ const calculateAge = (birthdayTs) => {
   }
 };
 
-/** ---- DROP-IN uploader for React Native / Expo ----
- *  - Works with file:// and content:// URIs
- *  - Sets contentType + cacheControl
- *  - Uses uploadBytesResumable (safer on mobile)
+/** Expo-safe uploader (XHR → Blob, single attempt, no reuse)
+ *  - Handles content:// by copying to cache first
+ *  - Uses uploadBytesResumable
+ *  - Writes to images/{filename} to match your current rules
+ *  - Always returns a defined `size` (null if unknown)
  */
 const uploadImageToStorage = async (imageUri, livestockId) => {
   try {
     if (!imageUri) return null;
 
-    // Detect filename + extension
     const uri = String(imageUri);
     const nameFromUri = uri.split('/').pop() || `photo_${Date.now()}.jpg`;
-    const ext = (nameFromUri.split('.').pop() || 'jpg').toLowerCase();
+    let ext = (nameFromUri.split('.').pop() || '').toLowerCase();
+    if (!['jpg','jpeg','png','webp','heic','gif'].includes(ext)) ext = 'jpg';
 
     const contentType =
       ext === 'png'  ? 'image/png'  :
@@ -57,61 +59,57 @@ const uploadImageToStorage = async (imageUri, livestockId) => {
       ext === 'gif'  ? 'image/gif'  :
       /* default */    'image/jpeg';
 
-    // Convert URI -> Blob (fetch works in Expo; keep XHR fallback for older Androids)
-    const uriToBlob = async (fileUri) => {
-      try {
-        const res = await fetch(fileUri);
-        return await res.blob();
-      } catch {
-        return await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.onload = function () { resolve(xhr.response); };
-          xhr.onerror = function () { reject(new TypeError('Network request failed')); };
-          xhr.responseType = 'blob';
-          xhr.open('GET', fileUri, true);
-          xhr.send(null);
-        });
-      }
-    };
+    // Some Android URIs are content:// -> copy to cache as file:// first
+    let localUri = uri;
+    if (uri.startsWith('content://')) {
+      const dest = `${FileSystem.cacheDirectory}upload_${Date.now()}.${ext}`;
+      await FileSystem.copyAsync({ from: uri, to: dest });
+      localUri = dest;
+    }
 
-    const blob = await uriToBlob(uri);
+    // Turn file URI into a Blob using XHR (reliable on RN/Expo)
+    const blob = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.onload = () => resolve(xhr.response);
+      xhr.onerror = () => reject(new TypeError('Failed to read file into Blob'));
+      xhr.responseType = 'blob';
+      xhr.open('GET', localUri, true);
+      xhr.send(null);
+    });
 
-    const storage = getStorage();
-    const safeId =
-      (livestockId || `livestock_${Date.now()}`).toString().replace(/[^a-zA-Z0-9_-]/g, '_');
-
+    const storage = getStorage(); // default bucket works with your current rules
+    const safeId = (livestockId || `livestock_${Date.now()}`)
+      .toString()
+      .replace(/[^a-zA-Z0-9_-]/g, '_');
     const filename = `${safeId}_${Date.now()}.${ext}`;
-    const storagePath = `images/${filename}`;
-    const storageRef = ref(storage, storagePath);
+    const storageRef = ref(storage, `images/${filename}`);
 
-    const metadata = {
-      contentType,
-      cacheControl: 'public, max-age=31536000',
-    };
+    const metadata = { contentType, cacheControl: 'public, max-age=31536000' };
 
+    // Upload once; do NOT read from/close the blob afterward
     const task = uploadBytesResumable(storageRef, blob, metadata);
-
     await new Promise((resolve, reject) => {
       task.on('state_changed', null, reject, resolve);
     });
 
     const downloadURL = await getDownloadURL(storageRef);
 
-    try { if (blob && typeof blob.close === 'function') blob.close(); } catch {}
-
+    // Important: don't touch blob here (no blob.size reads, no blob.close())
     return {
       url: downloadURL,
       path: storageRef.fullPath,
       name: filename,
-      size: blob.size ?? null,
+      size: null,                // <- never undefined
       contentType,
       uploadedAt: new Date().toISOString(),
     };
   } catch (error) {
-    console.error('Error uploading image:', error);
-    return null; // allow the rest of the flow to continue
+    console.error('upload error:', error);
+    return null; // let your submit flow continue without blocking
   }
 };
+
+
 
 export default function Dispersal({ navigation, onBackToTransactions, scannedUID }) {
   // ————————————————————————————————————————
@@ -274,178 +272,182 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
   // ————————————————————————————————————————
   // Submit: save to "livestock" collection + "beneficiaries"
   // ————————————————————————————————————————
-  const handleSubmit = async () => {
-    try {
-      const uid = auth?.currentUser?.uid || null;
-      const email = auth?.currentUser?.email || null;
+ // Utility: strip all `undefined` values (Firestore-safe)
+const removeUndefinedDeep = (val) => {
+  if (val === undefined) return undefined; // caller will delete keys
+  if (val === null || typeof val !== 'object') return val;
+  if (Array.isArray(val)) return val.map(removeUndefinedDeep);
+  const out = {};
+  for (const k of Object.keys(val)) {
+    const v = removeUndefinedDeep(val[k]);
+    if (v !== undefined) out[k] = v; // drop undefined keys
+  }
+  return out;
+};
 
-      if (!uid) {
-        Alert.alert('Not signed in', 'Please sign in first.');
-        return;
-      }
-      if (!selectedApplicant) {
-        Alert.alert('Missing applicant', 'Please search and select an applicant.');
-        return;
-      }
-      if (!livestockType?.trim()) {
-        Alert.alert('Missing livestock type', 'Please provide a livestock type.');
-        return;
-      }
-      if (!selectedApplicant?.municipality) {
-        Alert.alert('Location required', 'Applicant municipality not found.');
-        return;
-      }
-      if (!dateDisperse) {
-        Alert.alert('Date required', 'Please pick the dispersal date.');
-        return;
-      }
+const handleSubmit = async () => {
+  try {
+    const uid = auth?.currentUser?.uid || null;
+    const email = auth?.currentUser?.email || null;
 
-      // Get applicant details from applicants collection using applicantId
-      let applicantDetails = null;
-      console.log('Selected applicant:', selectedApplicant);
-      console.log('Applicant ID:', selectedApplicant.applicantId);
-      
-      if (selectedApplicant.applicantId) {
-        try {
-          const applicantDocRef = doc(db, 'applicants', selectedApplicant.applicantId);
-          const applicantDoc = await getDoc(applicantDocRef);
-          if (applicantDoc.exists()) {
-            applicantDetails = applicantDoc.data();
-            console.log('Fetched applicant details:', applicantDetails);
-          } else {
-            console.log('Applicant document not found');
-          }
-        } catch (error) {
-          console.error('Error fetching applicant details:', error);
-        }
-      } else {
-        console.log('No applicantId found in selectedApplicant');
-      }
-
-      // Get inspector/staff details
-      let inspectorDetails = null;
-      try {
-        const staffRef = collection(db, 'staff');
-        const staffQuery = query(staffRef, where('uid', '==', uid));
-        const staffSnap = await getDocs(staffQuery);
-        if (!staffSnap.empty) {
-          inspectorDetails = staffSnap.docs[0].data();
-          console.log('Fetched inspector details:', inspectorDetails);
-        }
-      } catch (error) {
-        console.error('Error fetching inspector details:', error);
-      }
-
-      // — 1) Upload image to Firebase Storage if present (uses new uploader)
-      let imageData = null;
-      if (image) {
-        const tempLivestockId = `${selectedApplicant.id}_${Date.now()}`;
-        imageData = await uploadImageToStorage(image, tempLivestockId);
-        if (imageData) {
-          console.log('Image uploaded successfully:', imageData);
-        } else {
-          console.log('Image upload failed, continuing without image');
-        }
-      }
-
-      // — 2) Save to "livestock"
-      const livestockId = `${selectedApplicant.id}_${Date.now()}`; // doc id + field
-      const livestockPayload = {
-        // NOTE: per your request, DO NOT store applicantId here.
-        livestockId,                         // ✅ keep livestockId inside the doc
-        applicantName: selectedApplicant.fullName || currentBeneficiary || '',
-        municipality: selectedApplicant.municipality,
-        barangay: applicantDetails?.barangay || selectedApplicant.barangay || null, // ✅ Save barangay
-        livestockSource: selectedApplicant.livestockSource || null, // ✅ Save livestock source
-        inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector',
-
-        livestockType: livestockType.trim(),
-        details: {
-          color: livestockColor.trim() || null,
-          age: livestockAge ? Number(livestockAge) : null,
-          breed: livestockBreed.trim() || null,
-          markings: livestockMarkings.trim() || null,
-        },
-
-        dateDisperse: Timestamp.fromDate(dateDisperse),
-        createdBy: uid,
-        createdAt: serverTimestamp(),
-      };
-
-      await setDoc(doc(db, 'livestock', livestockId), livestockPayload);
-
-      // — 3) Also save to "beneficiaries"
-      // Concatenate full address from applicant details
-      const addressParts = [];
-      if (applicantDetails?.street) addressParts.push(applicantDetails.street);
-      if (applicantDetails?.purok) addressParts.push(applicantDetails.purok);
-      if (applicantDetails?.barangay) addressParts.push(applicantDetails.barangay);
-      if (applicantDetails?.municipality) addressParts.push(applicantDetails.municipality);
-      
-      // Fallback to selectedApplicant data if applicantDetails is not available
-      if (addressParts.length === 0) {
-        if (selectedApplicant?.address) addressParts.push(selectedApplicant.address);
-        if (selectedApplicant?.barangay) addressParts.push(selectedApplicant.barangay);
-        if (selectedApplicant?.municipality) addressParts.push(selectedApplicant.municipality);
-      }
-      
-      const fullAddress = addressParts.length > 0 ? addressParts.join(', ') : selectedApplicant.municipality || '';
-
-      const beneficiaryPayload = {
-        name: selectedApplicant.fullName || currentBeneficiary || '',
-        address: fullAddress,
-        municipality: selectedApplicant.municipality, // ✅ Store municipality separately
-        barangay: applicantDetails?.barangay || selectedApplicant.barangay || null, // ✅ Store barangay separately
-        applicantId: selectedApplicant.applicantId || null, // ✅ Save applicant ID
-        sex: applicantDetails?.gender || selectedApplicant.gender || null,
-        age: applicantDetails?.age || calculateAge(applicantDetails?.birthday) || calculateAge(selectedApplicant.birthday) || null,
-        contactNumber: applicantDetails?.contact || selectedApplicant.contact || '',
-        dateDisperse: Timestamp.fromDate(dateDisperse),
-        livestock: livestockType.trim(),
-        livestockId,                     // ✅ link to livestock
-        card_uid: scannedUID || null,  // ✅ save the scanned UID as card_uid
-        fieldInputBy: { uid, email: email || null },
-        inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector', // ✅ Save inspector name
-        verificationStatus: 'pending',
-        image: imageData, // ✅ Store image data (URL, path, size, uploadedAt) or null if upload failed
-        createdAt: serverTimestamp(),
-      };
-
-      console.log('Beneficiary payload:', beneficiaryPayload);
-      console.log('Scanned UID:', scannedUID);
-
-      await addDoc(collection(db, 'beneficiaries'), beneficiaryPayload);
-
-      // Remove the applicant from dispersalSchedules after successful submission
-      try {
-        console.log('Updating dispersal schedule:', selectedApplicant.id);
-        const updateData = {
-          status: 'completed',
-          completedAt: serverTimestamp(),
-          completedBy: uid
-        };
-        console.log('Update data:', updateData);
-        
-        await setDoc(doc(db, 'dispersalSchedules', selectedApplicant.id), updateData, { merge: true });
-        console.log('Dispersal schedule updated successfully');
-      } catch (error) {
-        console.error('Error updating dispersal schedule status:', error);
-        // Don't fail the whole operation if this fails
-      }
-
-      Alert.alert('Submitted for Verification');
-      // Optional clear (keep selected applicant to allow multiple entries)
-      setLivestockType('');
-      setLivestockColor('');
-      setLivestockAge('');
-      setLivestockBreed('');
-      setLivestockMarkings('');
-      setDateDisperse(null);
-    } catch (e) {
-      console.error('Create records failed:', e);
-      Alert.alert('Error', e?.message || 'Failed to create records.');
+    if (!uid) {
+      Alert.alert('Not signed in', 'Please sign in first.');
+      return;
     }
-  };
+    if (!selectedApplicant) {
+      Alert.alert('Missing applicant', 'Please search and select an applicant.');
+      return;
+    }
+    if (!livestockType?.trim()) {
+      Alert.alert('Missing livestock type', 'Please provide a livestock type.');
+      return;
+    }
+    if (!selectedApplicant?.municipality) {
+      Alert.alert('Location required', 'Applicant municipality not found.');
+      return;
+    }
+    if (!dateDisperse) {
+      Alert.alert('Date required', 'Please pick the dispersal date.');
+      return;
+    }
+
+    // Get applicant details from applicants collection using applicantId
+    let applicantDetails = null;
+    if (selectedApplicant.applicantId) {
+      try {
+        const applicantDocRef = doc(db, 'applicants', selectedApplicant.applicantId);
+        const applicantDoc = await getDoc(applicantDocRef);
+        if (applicantDoc.exists()) applicantDetails = applicantDoc.data();
+      } catch (error) {
+        console.error('Error fetching applicant details:', error);
+      }
+    }
+
+    // Get inspector/staff details
+    let inspectorDetails = null;
+    try {
+      const staffRef = collection(db, 'staff');
+      const staffQuery = query(staffRef, where('uid', '==', uid));
+      const staffSnap = await getDocs(staffQuery);
+      if (!staffSnap.empty) inspectorDetails = staffSnap.docs[0].data();
+    } catch (error) {
+      console.error('Error fetching inspector details:', error);
+    }
+
+    // 1) Upload image (optional)
+    let imageData = null;
+    if (image) {
+      const tempLivestockId = `${selectedApplicant.id}_${Date.now()}`;
+      imageData = await uploadImageToStorage(image, tempLivestockId);
+    }
+
+    // 2) Save to "livestock"
+    const livestockId = `${selectedApplicant.id}_${Date.now()}`;
+    const livestockPayload = {
+      livestockId,
+      applicantName: selectedApplicant.fullName || currentBeneficiary || '',
+      municipality: selectedApplicant.municipality,
+      barangay: applicantDetails?.barangay || selectedApplicant.barangay || null,
+      livestockSource: selectedApplicant?.livestockSource || null,
+      inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector',
+
+      livestockType: livestockType.trim(),
+      details: {
+        color: livestockColor.trim() || null,
+        age: livestockAge ? Number(livestockAge) : null,
+        breed: livestockBreed.trim() || null,
+        markings: livestockMarkings.trim() || null,
+      },
+
+      dateDisperse: Timestamp.fromDate(dateDisperse),
+      createdBy: uid,
+      createdAt: serverTimestamp(),
+    };
+
+    await setDoc(doc(db, 'livestock', livestockId), removeUndefinedDeep(livestockPayload));
+
+    // Build address
+    const addressParts = [];
+    if (applicantDetails?.street) addressParts.push(applicantDetails.street);
+    if (applicantDetails?.purok) addressParts.push(applicantDetails.purok);
+    if (applicantDetails?.barangay) addressParts.push(applicantDetails.barangay);
+    if (applicantDetails?.municipality) addressParts.push(applicantDetails.municipality);
+    if (addressParts.length === 0) {
+      if (selectedApplicant?.address) addressParts.push(selectedApplicant.address);
+      if (selectedApplicant?.barangay) addressParts.push(selectedApplicant.barangay);
+      if (selectedApplicant?.municipality) addressParts.push(selectedApplicant.municipality);
+    }
+    const fullAddress = addressParts.length > 0 ? addressParts.join(', ') : selectedApplicant.municipality || '';
+
+    // Safe image object for Firestore (no undefined fields)
+    const imageRecord = imageData
+      ? {
+          url: imageData.url || null,
+          path: imageData.path || null,
+          name: imageData.name || null,
+          size: typeof imageData.size === 'number' ? imageData.size : null,
+          contentType: imageData.contentType || null,
+          uploadedAt: serverTimestamp(),
+        }
+      : null;
+
+    // 3) Save to "beneficiaries" (now includes imageUrl for website)
+    const beneficiaryPayload = {
+      name: selectedApplicant.fullName || currentBeneficiary || '',
+      address: fullAddress,
+      municipality: selectedApplicant.municipality,
+      barangay: applicantDetails?.barangay || selectedApplicant.barangay || null,
+      applicantId: selectedApplicant.applicantId || null,
+      sex: applicantDetails?.gender || selectedApplicant.gender || null,
+      age:
+        applicantDetails?.age ??
+        calculateAge(applicantDetails?.birthday) ??
+        calculateAge(selectedApplicant.birthday) ??
+        null,
+      contactNumber: applicantDetails?.contact || selectedApplicant.contact || '',
+      dateDisperse: Timestamp.fromDate(dateDisperse),
+      livestock: livestockType.trim(),
+      livestockId,
+      card_uid: scannedUID || null,
+      fieldInputBy: { uid, email: email || null },
+      inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector',
+      verificationStatus: 'pending',
+      createdAt: serverTimestamp(),
+
+      // 🔽 new fields for website consumption
+      imageUrl: imageRecord?.url || null,
+      image: imageRecord, // structured object (no undefineds)
+    };
+
+    await addDoc(collection(db, 'beneficiaries'), removeUndefinedDeep(beneficiaryPayload));
+
+    // 4) Mark schedule completed (best-effort)
+    try {
+      const updateData = {
+        status: 'completed',
+        completedAt: serverTimestamp(),
+        completedBy: uid,
+      };
+      await setDoc(doc(db, 'dispersalSchedules', selectedApplicant.id), updateData, { merge: true });
+    } catch (error) {
+      console.error('Error updating dispersal schedule status:', error);
+    }
+
+    Alert.alert('Submitted for Verification');
+
+    // Optional clear
+    setLivestockType('');
+    setLivestockColor('');
+    setLivestockAge('');
+    setLivestockBreed('');
+    setLivestockMarkings('');
+    setDateDisperse(null);
+  } catch (e) {
+    console.error('Create records failed:', e);
+    Alert.alert('Error', e?.message || 'Failed to create records.');
+  }
+};
+
 
   // ————————————————————————————————————————
   // UI
