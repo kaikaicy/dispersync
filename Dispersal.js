@@ -36,6 +36,20 @@ const calculateAge = (birthdayTs) => {
     return null;
   }
 };
+// Normalize a JS Date to LOCAL date-only (set 12:00 to avoid DST/TZ edge cases)
+const normalizeDateOnly = (d) => {
+  const dt = d instanceof Date ? d : new Date(d);
+  return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), 12, 0, 0, 0);
+};
+
+// YYYY-MM-DD for easy display/search
+const toISODate = (d) => {
+  const dt = d instanceof Date ? d : new Date(d);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 
 /** Expo-safe uploader (XHR → Blob, single attempt, no reuse)
  *  - Handles content:// by copying to cache first
@@ -273,14 +287,17 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
   // Submit: save to "livestock" collection + "beneficiaries"
   // ————————————————————————————————————————
  // Utility: strip all `undefined` values (Firestore-safe)
+
+
+// Utility: strip all `undefined` values (Firestore-safe)
 const removeUndefinedDeep = (val) => {
-  if (val === undefined) return undefined; // caller will delete keys
+  if (val === undefined) return undefined;
   if (val === null || typeof val !== 'object') return val;
   if (Array.isArray(val)) return val.map(removeUndefinedDeep);
   const out = {};
   for (const k of Object.keys(val)) {
     const v = removeUndefinedDeep(val[k]);
-    if (v !== undefined) out[k] = v; // drop undefined keys
+    if (v !== undefined) out[k] = v;
   }
   return out;
 };
@@ -290,28 +307,18 @@ const handleSubmit = async () => {
     const uid = auth?.currentUser?.uid || null;
     const email = auth?.currentUser?.email || null;
 
-    if (!uid) {
-      Alert.alert('Not signed in', 'Please sign in first.');
-      return;
-    }
-    if (!selectedApplicant) {
-      Alert.alert('Missing applicant', 'Please search and select an applicant.');
-      return;
-    }
-    if (!livestockType?.trim()) {
-      Alert.alert('Missing livestock type', 'Please provide a livestock type.');
-      return;
-    }
-    if (!selectedApplicant?.municipality) {
-      Alert.alert('Location required', 'Applicant municipality not found.');
-      return;
-    }
-    if (!dateDisperse) {
-      Alert.alert('Date required', 'Please pick the dispersal date.');
-      return;
-    }
+    if (!uid) return Alert.alert('Not signed in', 'Please sign in first.');
+    if (!selectedApplicant) return Alert.alert('Missing applicant', 'Please search and select an applicant.');
+    if (!livestockType?.trim()) return Alert.alert('Missing livestock type', 'Please provide a livestock type.');
+    if (!selectedApplicant?.municipality) return Alert.alert('Location required', 'Applicant municipality not found.');
+    if (!dateDisperse) return Alert.alert('Date required', 'Please pick the dispersal date.');
 
-    // Get applicant details from applicants collection using applicantId
+    // ---------- Build consistent “date only” pair ----------
+    const pickedDate = normalizeDateOnly(dateDisperse);
+    const dateDisperseTs = Timestamp.fromDate(pickedDate);  // true Firestore Timestamp
+    const dateDisperseISO = toISODate(pickedDate);          // human-readable yyyy-mm-dd
+
+    // Fetch applicant details (optional)
     let applicantDetails = null;
     if (selectedApplicant.applicantId) {
       try {
@@ -323,7 +330,7 @@ const handleSubmit = async () => {
       }
     }
 
-    // Get inspector/staff details
+    // Fetch staff/inspector
     let inspectorDetails = null;
     try {
       const staffRef = collection(db, 'staff');
@@ -341,7 +348,7 @@ const handleSubmit = async () => {
       imageData = await uploadImageToStorage(image, tempLivestockId);
     }
 
-    // 2) Save to "livestock"
+    // 2) Save to "livestock" (rich data lives here)
     const livestockId = `${selectedApplicant.id}_${Date.now()}`;
     const livestockPayload = {
       livestockId,
@@ -359,45 +366,39 @@ const handleSubmit = async () => {
         markings: livestockMarkings.trim() || null,
       },
 
-      dateDisperse: Timestamp.fromDate(dateDisperse),
+      dateDisperse: dateDisperseTs, // normalized Timestamp
+      dateDisperseISO,              // human string
       createdBy: uid,
-      createdAt: serverTimestamp(),
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
     };
 
     await setDoc(doc(db, 'livestock', livestockId), removeUndefinedDeep(livestockPayload));
 
-    // Build address
-    const addressParts = [];
-    if (applicantDetails?.street) addressParts.push(applicantDetails.street);
-    if (applicantDetails?.purok) addressParts.push(applicantDetails.purok);
-    if (applicantDetails?.barangay) addressParts.push(applicantDetails.barangay);
-    if (applicantDetails?.municipality) addressParts.push(applicantDetails.municipality);
-    if (addressParts.length === 0) {
-      if (selectedApplicant?.address) addressParts.push(selectedApplicant.address);
-      if (selectedApplicant?.barangay) addressParts.push(selectedApplicant.barangay);
-      if (selectedApplicant?.municipality) addressParts.push(selectedApplicant.municipality);
+    // 3) Build address (single field)
+    const parts = [];
+    if (applicantDetails?.street) parts.push(applicantDetails.street);
+    if (applicantDetails?.purok) parts.push(applicantDetails.purok);
+    if (applicantDetails?.barangay) parts.push(applicantDetails.barangay);
+    if (applicantDetails?.municipality) parts.push(applicantDetails.municipality);
+    if (parts.length === 0) {
+      if (selectedApplicant?.address) parts.push(selectedApplicant.address);
+      if (selectedApplicant?.barangay) parts.push(selectedApplicant.barangay);
+      if (selectedApplicant?.municipality) parts.push(selectedApplicant.municipality);
     }
-    const fullAddress = addressParts.length > 0 ? addressParts.join(', ') : selectedApplicant.municipality || '';
+    const fullAddress = parts.length > 0 ? parts.join(', ') : selectedApplicant.municipality || '';
 
-    // Safe image object for Firestore (no undefined fields)
-    const imageRecord = imageData
-      ? {
-          url: imageData.url || null,
-          path: imageData.path || null,
-          name: imageData.name || null,
-          size: typeof imageData.size === 'number' ? imageData.size : null,
-          contentType: imageData.contentType || null,
-          uploadedAt: serverTimestamp(),
-        }
-      : null;
-
-    // 3) Save to "beneficiaries" (now includes imageUrl for website)
+    // 4) Save to "beneficiaries" — CLEAN (no redundant fields)
     const beneficiaryPayload = {
+      // identity
       name: selectedApplicant.fullName || currentBeneficiary || '',
+      applicantId: selectedApplicant.applicantId || null,
+
+      // location
       address: fullAddress,
       municipality: selectedApplicant.municipality,
-      barangay: applicantDetails?.barangay || selectedApplicant.barangay || null,
-      applicantId: selectedApplicant.applicantId || null,
+
+      // contact + demographics
       sex: applicantDetails?.gender || selectedApplicant.gender || null,
       age:
         applicantDetails?.age ??
@@ -405,27 +406,36 @@ const handleSubmit = async () => {
         calculateAge(selectedApplicant.birthday) ??
         null,
       contactNumber: applicantDetails?.contact || selectedApplicant.contact || '',
-      dateDisperse: Timestamp.fromDate(dateDisperse),
-      livestock: livestockType.trim(),
+
+      // dispersal linkage + dates
       livestockId,
+      dateDisperse: dateDisperseTs, // normalized Timestamp
+      dateDisperseISO,              // human string for easy display
+
+      // tagging / ownership
       card_uid: scannedUID || null,
       fieldInputBy: { uid, email: email || null },
       inspectorName: inspectorDetails?.fullName || inspectorDetails?.name || 'Unknown Inspector',
-      verificationStatus: 'pending',
-      createdAt: serverTimestamp(),
 
-      // 🔽 new fields for website consumption
-      imageUrl: imageRecord?.url || null,
-      image: imageRecord, // structured object (no undefineds)
+      // status + verification
+      status: 'dispersed',
+      verificationStatus: 'pending',
+
+      // times
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+
+      // media
+      imageUrl: imageData?.url || null,
     };
 
     await addDoc(collection(db, 'beneficiaries'), removeUndefinedDeep(beneficiaryPayload));
 
-    // 4) Mark schedule completed (best-effort)
+    // 5) Mark schedule completed (best-effort)
     try {
       const updateData = {
         status: 'completed',
-        completedAt: serverTimestamp(),
+        completedAt: Timestamp.now(),
         completedBy: uid,
       };
       await setDoc(doc(db, 'dispersalSchedules', selectedApplicant.id), updateData, { merge: true });
@@ -435,7 +445,7 @@ const handleSubmit = async () => {
 
     Alert.alert('Submitted for Verification');
 
-    // Optional clear
+    // Clear some fields
     setLivestockType('');
     setLivestockColor('');
     setLivestockAge('');
@@ -447,6 +457,7 @@ const handleSubmit = async () => {
     Alert.alert('Error', e?.message || 'Failed to create records.');
   }
 };
+
 
 
   // ————————————————————————————————————————
