@@ -37,6 +37,14 @@ export default function ListForDispersal({ highlightScheduleId }) {
   const [search, setSearch] = useState('');
   const [highlightId, setHighlightId] = useState(null);
 
+  // Filters
+  const [muniFilter, setMuniFilter] = useState('all');
+  const [brgyFilter, setBrgyFilter] = useState('all');
+  const [livestockFilter, setLivestockFilter] = useState('all');
+  const [muniPickerOpen, setMuniPickerOpen] = useState(false);
+  const [brgyPickerOpen, setBrgyPickerOpen] = useState(false);
+  const [livestockPickerOpen, setLivestockPickerOpen] = useState(false);
+
   useEffect(() => {
     if (highlightScheduleId) {
       setHighlightId(highlightScheduleId);
@@ -79,21 +87,54 @@ export default function ListForDispersal({ highlightScheduleId }) {
 
   useEffect(() => {
     const qSched = query(collection(db, 'dispersalSchedules'));
-    const unsub = onSnapshot(
+    // Listen to both dispersalSchedules and beneficiaries
+    let unsubSched = null;
+    let unsubBeneficiaries = null;
+    let latestSchedules = [];
+    let latestApplicants = [];
+    let latestBeneficiaryIds = [];
+
+    // Helper to update rows after both data are loaded
+    const updateRows = () => {
+      // Only show pending schedules whose applicantId is NOT in beneficiaries
+      const pendingSchedules = latestSchedules.filter((sched) => sched.status !== 'completed');
+      const filtered = pendingSchedules.filter(
+        (sched) => !latestBeneficiaryIds.includes(sched.applicantId)
+      );
+      const combined = filtered.map((sched) => {
+        const app = latestApplicants.find((a) => a.id === sched.applicantId) || {};
+        return {
+          id: sched.id,
+          applicantId: sched.applicantId,
+          name: app.fullName || '(No name)',
+          barangay: app.barangay || '-',
+          municipality: app.municipality || '-',
+          address: app.address || 'Address not specified',
+          livestock: app.livestock || '-',
+          contact: app.contact || 'No contact',
+          scheduledFor: sched.scheduledFor,
+          livestockSource: sched.livestockSource,
+          applicant: app,
+        };
+      });
+      setRows(combined);
+      setLoading(false);
+    };
+
+    unsubSched = onSnapshot(
       qSched,
       async (snap) => {
         try {
           const schedules = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          latestSchedules = schedules;
           const applicantIds = Array.from(
             new Set(schedules.map((r) => r.applicantId).filter(Boolean))
           );
-  
           if (applicantIds.length === 0) {
-            setRows([]);
-            setLoading(false);
+            latestApplicants = [];
+            updateRows();
             return;
           }
-  
           // fetch applicants in batches (with contact field)
           const applicants = [];
           for (const ids of chunk(applicantIds, 10)) {
@@ -104,35 +145,8 @@ export default function ListForDispersal({ highlightScheduleId }) {
               applicants.push({ id: doc.id, ...doc.data() })
             );
           }
-  
-          // build rows - filter out completed schedules
-          console.log('All schedules:', schedules);
-          const completedSchedules = schedules.filter((sched) => sched.status === 'completed');
-          console.log('Completed schedules:', completedSchedules);
-          
-          const pendingSchedules = schedules.filter((sched) => sched.status !== 'completed');
-          console.log('Pending schedules:', pendingSchedules);
-          
-          const combined = pendingSchedules
-            .map((sched) => {
-              const app = applicants.find((a) => a.id === sched.applicantId) || {};
-              return {
-                id: sched.id,
-                applicantId: sched.applicantId,
-                name: app.fullName || '(No name)',
-                barangay: app.barangay || '-',
-                municipality: app.municipality || '-',
-                address: app.address || '-',
-                livestock: app.livestock || '-',
-                contact: app.contact || 'No contact',
-                scheduledFor: sched.scheduledFor,
-                livestockSource: sched.livestockSource,
-                applicant: app,
-              };
-            });
-  
-          setRows(combined);
-          setLoading(false);
+          latestApplicants = applicants;
+          updateRows();
         } catch (err) {
           console.error('Load list for dispersal failed:', err);
           setLoading(false);
@@ -151,8 +165,28 @@ export default function ListForDispersal({ highlightScheduleId }) {
         );
       }
     );
-  
-    return () => unsub();
+
+    // Listen to beneficiaries collection for live updates
+    // Note: beneficiaries docs have random IDs; applicant linkage is in `applicantId` field
+    unsubBeneficiaries = onSnapshot(
+      collection(db, 'beneficiaries'),
+      (snap) => {
+        latestBeneficiaryIds = snap.docs
+          .map((d) => (d.data() || {}).applicantId)
+          .filter(Boolean);
+        updateRows();
+      },
+      (err) => {
+        console.error('beneficiaries onSnapshot error:', err);
+        latestBeneficiaryIds = [];
+        updateRows();
+      }
+    );
+
+    return () => {
+      if (unsubSched) unsubSched();
+      if (unsubBeneficiaries) unsubBeneficiaries();
+    };
   }, []);
   
 
@@ -163,13 +197,54 @@ export default function ListForDispersal({ highlightScheduleId }) {
     return rows.filter((b) => allMunicipalities.includes(String(b.municipality || '').toLowerCase().trim()));
   }, [rows, staffMunicipality, additionalMunicipalities]);
 
+  // Build dropdown options
+  const municipalityOptions = useMemo(() => {
+    const set = new Set();
+    municipalityFiltered.forEach(r => {
+      const m = (r.municipality || '').trim();
+      if (m) set.add(m);
+    });
+    return ['all', ...Array.from(set).sort()];
+  }, [municipalityFiltered]);
+
+  const barangayOptions = useMemo(() => {
+    const set = new Set();
+    municipalityFiltered
+      .filter(r => muniFilter === 'all' || (r.municipality || '') === muniFilter)
+      .forEach(r => {
+        const b = (r.barangay || '').trim();
+        if (b) set.add(b);
+      });
+    return ['all', ...Array.from(set).sort()];
+  }, [municipalityFiltered, muniFilter]);
+
+  const livestockOptions = useMemo(() => {
+    const set = new Set();
+    municipalityFiltered.forEach(r => {
+      const l = (r.livestock || '').trim();
+      if (l) set.add(l.toLowerCase());
+    });
+    return ['all', ...Array.from(set).sort()];
+  }, [municipalityFiltered]);
+
+  // Apply filters pipeline
   const filtered = useMemo(() => {
+    let list = municipalityFiltered;
+    if (muniFilter !== 'all') {
+      list = list.filter(r => (r.municipality || '') === muniFilter);
+    }
+    if (brgyFilter !== 'all') {
+      list = list.filter(r => (r.barangay || '') === brgyFilter);
+    }
+    if (livestockFilter !== 'all') {
+      list = list.filter(r => String(r.livestock || '').toLowerCase() === livestockFilter);
+    }
     const s = search.trim().toLowerCase();
-    if (!s) return municipalityFiltered;
-    return municipalityFiltered.filter(
+    if (!s) return list;
+    return list.filter(
       (b) => b.name?.toLowerCase().includes(s) || b.barangay?.toLowerCase().includes(s)
     );
-  }, [municipalityFiltered, search]);
+  }, [municipalityFiltered, muniFilter, brgyFilter, livestockFilter, search]);
 
   const headerPlace = staffMunicipality && typeof staffMunicipality === 'string'
     ? [staffMunicipality, ...additionalMunicipalities.filter(m => !!m)].join(', ')
@@ -229,6 +304,33 @@ export default function ListForDispersal({ highlightScheduleId }) {
             onChangeText={setSearch}
           />
         </View>
+
+        {/* Filters row */}
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+          <TouchableOpacity
+            style={{ backgroundColor: colors.white, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.border, flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+            onPress={() => setMuniPickerOpen(true)}
+          >
+            <Text style={{ color: colors.text }}>{`Municipality: ${muniFilter === 'all' ? 'All' : muniFilter}`}</Text>
+            <Ionicons name="chevron-down" size={16} color={colors.textLight} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ backgroundColor: colors.white, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.border, flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+            onPress={() => setBrgyPickerOpen(true)}
+          >
+            <Text style={{ color: colors.text }}>{`Barangay: ${brgyFilter === 'all' ? 'All' : brgyFilter}`}</Text>
+            <Ionicons name="chevron-down" size={16} color={colors.textLight} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ backgroundColor: colors.white, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.border, flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+            onPress={() => setLivestockPickerOpen(true)}
+          >
+            <Text style={{ color: colors.text }}>{`Livestock: ${livestockFilter === 'all' ? 'All' : livestockFilter.charAt(0).toUpperCase() + livestockFilter.slice(1)}`}</Text>
+            <Ionicons name="chevron-down" size={16} color={colors.textLight} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {(!authReady || loading) ? (
@@ -275,9 +377,8 @@ export default function ListForDispersal({ highlightScheduleId }) {
                   <View style={styles.applicantInfo}>
                     <Text style={styles.applicantName}>{b.name}</Text>
                     <Text style={styles.applicantDetails}>
-                      {b.barangay || 'Barangay N/A'} • {b.municipality || 'Municipality N/A'}
+                      {[b.barangay || null, b.municipality || null].filter(Boolean).join(', ') || 'Location not specified'}
                     </Text>
-                    <Text style={styles.applicantAddress}>{b.address || 'Address not specified'}</Text>
                   </View>
                   <View style={styles.applicantStatus}>
                     <View style={styles.statusBadge}>
@@ -328,7 +429,7 @@ export default function ListForDispersal({ highlightScheduleId }) {
               <View>
                 <DetailRow label="Applicant ID" value={selectedApplicant.id} />
                 <DetailRow label="Name" value={selectedApplicant.name} />
-                <DetailRow label="Address" value={selectedApplicant.address || '—'} />
+                <DetailRow label="Address" value={selectedApplicant.address || 'Address not specified'} />
                 <DetailRow label="Barangay" value={selectedApplicant.barangay || '—'} />
                 <DetailRow label="Municipality" value={selectedApplicant.municipality || '—'} />
                 <DetailRow label="Contact Number" value={selectedApplicant?.contact || '—'} />
@@ -350,6 +451,104 @@ export default function ListForDispersal({ highlightScheduleId }) {
             </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      {/* Municipality picker */}
+      <Modal
+        visible={muniPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMuniPickerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}
+          onPressOut={() => setMuniPickerOpen(false)}
+        >
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, width: '100%', maxWidth: 360, paddingVertical: 8 }}>
+            {municipalityOptions.map((opt) => (
+              <TouchableOpacity
+                key={`muni-${opt}`}
+                onPress={() => {
+                  setMuniFilter(opt);
+                  // Reset barangay if municipality changes
+                  setBrgyFilter('all');
+                  setMuniPickerOpen(false);
+                }}
+                style={{ paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <Text style={{ fontSize: 16, color: '#333' }}>{opt === 'all' ? 'All' : opt}</Text>
+                {muniFilter === opt && (
+                  <Ionicons name="checkmark" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Barangay picker */}
+      <Modal
+        visible={brgyPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBrgyPickerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}
+          onPressOut={() => setBrgyPickerOpen(false)}
+        >
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, width: '100%', maxWidth: 360, paddingVertical: 8 }}>
+            {barangayOptions.map((opt) => (
+              <TouchableOpacity
+                key={`brgy-${opt}`}
+                onPress={() => {
+                  setBrgyFilter(opt);
+                  setBrgyPickerOpen(false);
+                }}
+                style={{ paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <Text style={{ fontSize: 16, color: '#333' }}>{opt === 'all' ? 'All' : opt}</Text>
+                {brgyFilter === opt && (
+                  <Ionicons name="checkmark" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Livestock picker */}
+      <Modal
+        visible={livestockPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLivestockPickerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}
+          onPressOut={() => setLivestockPickerOpen(false)}
+        >
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, width: '100%', maxWidth: 360, paddingVertical: 8 }}>
+            {livestockOptions.map((opt) => (
+              <TouchableOpacity
+                key={`liv-${opt}`}
+                onPress={() => {
+                  setLivestockFilter(opt);
+                  setLivestockPickerOpen(false);
+                }}
+                style={{ paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <Text style={{ fontSize: 16, color: '#333', textTransform: opt === 'all' ? 'none' : 'capitalize' }}>{opt === 'all' ? 'All' : opt}</Text>
+                {livestockFilter === opt && (
+                  <Ionicons name="checkmark" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
       </Modal>
     </View>
   );

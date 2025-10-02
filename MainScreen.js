@@ -111,12 +111,15 @@ export function ScanningCircle({ duration = 2000, size = 140, strokeWidth = 10, 
 export default function MainScreen({ navigation, route }) {
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [notifModalVisible, setNotifModalVisible] = useState(false);
-  const [notifCounts, setNotifCounts] = useState({ beneficiaries: 0, inspect: 0, dispersal: 0 });
+  const [notifCounts, setNotifCounts] = useState({ beneficiaries: 0, beneficiariesAdditional: 0, totalBeneficiaries: 0, inspect: 0, dispersal: 0, dispersalMain: 0, dispersalAdditional: 0 });
+  const [inspectBreakdown, setInspectBreakdown] = useState({});
+  const [dispersalBreakdown, setDispersalBreakdown] = useState({});
   const [lastSeenCounts, setLastSeenCounts] = useState({ beneficiaries: 0, inspect: 0, dispersal: 0 });
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [staffRole, setStaffRole] = useState(null);
-  const [staffMunicipality, setStaffMunicipality] = useState(null);
+  const [staffMunicipality, setStaffMunicipality] = useState(null); // main
+  const [additionalMunicipalities, setAdditionalMunicipalities] = useState([]); // array of additional municipalities
   const [showBeneficiaries, setShowBeneficiaries] = useState(false);
   const [showInspect, setShowInspect] = useState(false);
   const [showForDispersal, setShowForDispersal] = useState(false);
@@ -146,6 +149,7 @@ export default function MainScreen({ navigation, route }) {
       try {
         if (!user) {
           setStaffMunicipality(null);
+          setAdditionalMunicipalities([]);
           setLastSeenCounts({ beneficiaries: 0, inspect: 0, dispersal: 0 });
           setUnreadCount(0);
           return;
@@ -155,6 +159,13 @@ export default function MainScreen({ navigation, route }) {
         const muni = data.municipality || data.Municipality || data?.location?.municipality || null;
         setStaffMunicipality(typeof muni === 'string' ? muni : null);
         setStaffRole(data?.role || data?.userRole || null);
+        // Additional municipalities: support array or comma-separated string
+        let addMuni = data.additionalMunicipalities || data.additional_municipalities || data.additionalAreas || [];
+        if (typeof addMuni === 'string') {
+          addMuni = addMuni.split(',').map(m => m.trim()).filter(Boolean);
+        }
+        if (!Array.isArray(addMuni)) addMuni = [];
+        setAdditionalMunicipalities(addMuni);
         const seen = data?.lastSeenCounts;
         if (seen && typeof seen === 'object') {
           setLastSeenCounts({
@@ -177,6 +188,7 @@ export default function MainScreen({ navigation, route }) {
       } catch (e) {
         console.error('Failed to load staff municipality:', e);
         setStaffMunicipality(null);
+        setAdditionalMunicipalities([]);
       }
     });
     return () => unsub();
@@ -214,19 +226,24 @@ export default function MainScreen({ navigation, route }) {
         collection(db, 'applicants'),
         (snap) => {
           let count = 0;
+          const breakdown = {};
           snap.forEach((d) => {
             const data = d.data();
             const status = data.inspectionStatus || data.status || data.inspection || 'pending';
-            const muni = data.municipality || data.municipalityName || data.area || '';
+            const muni = (data.municipality || data.municipalityName || data.area || '').trim();
             const needsInspection = status === 'pending' || status === 'not started' || status === 'pending inspection' || status === '';
+            // Only count if assigned to user's municipalities
+            const assignedMunicipalities = [
+              ...(staffMunicipality ? [staffMunicipality] : []),
+              ...(additionalMunicipalities || [])
+            ].map(m => String(m).toLowerCase().trim());
             if (!needsInspection) return;
-            if (!staffMunicipality) {
-              count += 1;
-            } else if (String(muni).toLowerCase().trim() === String(staffMunicipality).toLowerCase().trim()) {
-              count += 1;
-            }
+            if (!muni || !assignedMunicipalities.includes(muni.toLowerCase())) return;
+            count += 1;
+            breakdown[muni] = (breakdown[muni] || 0) + 1;
           });
           setNotifCounts((prev) => ({ ...prev, inspect: count }));
+          setInspectBreakdown(breakdown);
         },
         (err) => console.error('onSnapshot applicants error:', err)
       );
@@ -235,19 +252,29 @@ export default function MainScreen({ navigation, route }) {
       console.error('Applicants listener setup failed:', e);
     }
 
-    // Approved beneficiaries - use the beneficiaries collection directly for accurate count
+    // Beneficiaries: count for main, additional, and total
     try {
-      const qRef = staffMunicipality
-        ? query(collection(db, 'beneficiaries'), where('municipality', '==', staffMunicipality))
-        : collection(db, 'beneficiaries');
-        
       const unsubBeneficiaries = onSnapshot(
-        qRef,
+        collection(db, 'beneficiaries'),
         (snap) => {
           try {
-            // Count the actual number of beneficiaries in the collection
-            const count = snap.docs.length;
-            setNotifCounts((prev) => ({ ...prev, beneficiaries: count }));
+            let mainCount = 0;
+            let additionalCount = 0;
+            snap.forEach(docSnap => {
+              const data = docSnap.data();
+              const muni = (data.municipality || data.municipalityName || data.area || '').toLowerCase().trim();
+              if (staffMunicipality && muni === String(staffMunicipality).toLowerCase().trim()) {
+                mainCount += 1;
+              } else if (additionalMunicipalities && additionalMunicipalities.map(m => m.toLowerCase().trim()).includes(muni)) {
+                additionalCount += 1;
+              }
+            });
+            setNotifCounts((prev) => ({
+              ...prev,
+              beneficiaries: mainCount,
+              beneficiariesAdditional: additionalCount,
+              totalBeneficiaries: mainCount + additionalCount
+            }));
           } catch (err) {
             console.error('Beneficiaries count load failed:', err);
           }
@@ -259,7 +286,7 @@ export default function MainScreen({ navigation, route }) {
       console.error('Beneficiaries listener setup failed:', e);
     }
 
-    // Dispersal schedules (status !== 'completed'), join applicants to filter by municipality
+    // Dispersal schedules (status !== 'completed'), exclude beneficiaries, then filter by assigned municipalities
     try {
       const unsubDispersal = onSnapshot(
         collection(db, 'dispersalSchedules'),
@@ -269,9 +296,26 @@ export default function MainScreen({ navigation, route }) {
             const filteredSched = schedules.filter((s) => s.status !== 'completed');
             const applicantIds = Array.from(new Set(filteredSched.map((r) => r.applicantId).filter(Boolean)));
             if (applicantIds.length === 0) {
-              setNotifCounts((prev) => ({ ...prev, dispersal: 0 }));
+              setNotifCounts((prev) => ({ ...prev, dispersal: 0, dispersalMain: 0, dispersalAdditional: 0 }));
+              setDispersalBreakdown({});
               return;
             }
+
+            // Load current beneficiaries to exclude already-dispersed applicants (align with ListForDispersal)
+            const beneficiariesSnap = await getDocs(collection(db, 'beneficiaries'));
+            const beneficiaryApplicantIds = new Set(
+              beneficiariesSnap.docs
+                .map((d) => (d.data() || {}).applicantId)
+                .filter(Boolean)
+            );
+
+            const pendingOnly = filteredSched.filter((sched) => !beneficiaryApplicantIds.has(sched.applicantId));
+            if (pendingOnly.length === 0) {
+              setNotifCounts((prev) => ({ ...prev, dispersal: 0, dispersalMain: 0, dispersalAdditional: 0 }));
+              setDispersalBreakdown({});
+              return;
+            }
+
             const applicantsMap = {};
             for (let i = 0; i < applicantIds.length; i += 10) {
               const batch = applicantIds.slice(i, i + 10);
@@ -280,15 +324,25 @@ export default function MainScreen({ navigation, route }) {
                 applicantsMap[docSnap.id] = docSnap.data();
               });
             }
-            let count = 0;
-            for (const sched of filteredSched) {
+            let mainCount = 0;
+            let additionalCount = 0;
+            const breakdown = {};
+            for (const sched of pendingOnly) {
               const app = applicantsMap[sched.applicantId] || {};
-              const muni = app.municipality || '-';
-              if (!staffMunicipality || String(muni).toLowerCase().trim() === String(staffMunicipality).toLowerCase().trim()) {
-                count += 1;
+              const muniRaw = (app.municipality || app.municipalityName || app.area || '-').toString();
+              const muni = muniRaw.toLowerCase().trim();
+              const main = staffMunicipality ? String(staffMunicipality).toLowerCase().trim() : '';
+              const additional = (additionalMunicipalities || []).map(m => String(m).toLowerCase().trim());
+              if (main && muni === main) {
+                mainCount += 1;
+                breakdown[muniRaw] = (breakdown[muniRaw] || 0) + 1;
+              } else if (additional.includes(muni)) {
+                additionalCount += 1;
+                breakdown[muniRaw] = (breakdown[muniRaw] || 0) + 1;
               }
             }
-            setNotifCounts((prev) => ({ ...prev, dispersal: count }));
+            setNotifCounts((prev) => ({ ...prev, dispersal: mainCount + additionalCount, dispersalMain: mainCount, dispersalAdditional: additionalCount }));
+            setDispersalBreakdown(breakdown);
           } catch (err) {
             console.error('Dispersal count load failed:', err);
           }
@@ -306,7 +360,7 @@ export default function MainScreen({ navigation, route }) {
       });
       try { stopSync && stopSync(); } catch (_) {}
     };
-  }, [staffMunicipality, staffRole]);
+  }, [staffMunicipality, staffRole, additionalMunicipalities]);
 
   // Fetch monthly dispersal trends and other stats
   useEffect(() => {
@@ -439,43 +493,170 @@ export default function MainScreen({ navigation, route }) {
       return (
         <>
           {renderDashboardHeader()}
-          {/* Summary Cards - 2x2 grid, more formal, smaller icons/text, no "Summary of Details" */}
+          {/* Summary Cards - 2x2 grid, updated for municipality logic */}
           <View style={styles.summaryGrid}>
             <View style={styles.summaryGridRow}>
-              {/* Beneficiaries in Municipality */}
-              <View style={styles.summaryCard}>
-                <View style={[styles.summaryIconCircle, { backgroundColor: '#E3F4EC' }]}>
+              {/* Beneficiaries in Main Municipality */}
+              <TouchableOpacity 
+                style={styles.summaryCard}
+                activeOpacity={0.8}
+                onPress={() => {
+                  // Manual navigation: ensure no highlight is shown
+                  setHighlightInspectApplicantId(null);
+                  setHighlightBeneficiaryApplicantId(null);
+                  setHighlightDispersalScheduleId(null);
+                  setShowBeneficiaries(true);
+                  setShowInspect(false);
+                  setShowForDispersal(false);
+                }}
+              >
+                <View style={[styles.summaryIconCircle, { backgroundColor: '#E3F4EC' }]}> 
                   <Ionicons name="people-outline" size={22} color="#25A18E" />
                 </View>
                 <Text style={styles.summaryNumber}>{notifCounts.beneficiaries}</Text>
-                <Text style={styles.summaryLabel}>Beneficiaries{'\n'}in Municipality</Text>
-              </View>
+                <Text style={styles.summaryLabel}>
+                  Beneficiaries{'\n'}in {staffMunicipality ? staffMunicipality : 'Main Municipality'}
+                </Text>
+              </TouchableOpacity>
               {/* Applicants Needing Inspection */}
-              <View style={styles.summaryCard}>
-                <View style={[styles.summaryIconCircle, { backgroundColor: '#F5F9F8' }]}>
+              <TouchableOpacity 
+                style={styles.summaryCard}
+                activeOpacity={0.8}
+                onPress={() => {
+                  // Manual navigation: ensure no highlight is shown
+                  setHighlightInspectApplicantId(null);
+                  setHighlightBeneficiaryApplicantId(null);
+                  setHighlightDispersalScheduleId(null);
+                  setShowBeneficiaries(false);
+                  setShowInspect(true);
+                  setShowForDispersal(false);
+                }}
+              >
+                <View style={[styles.summaryIconCircle, { backgroundColor: '#F5F9F8' }]}> 
                   <Ionicons name="clipboard-outline" size={22} color="#25A18E" />
                 </View>
                 <Text style={styles.summaryNumber}>{notifCounts.inspect}</Text>
-                <Text style={styles.summaryLabel}>Applicants Needing{'\n'}Inspection</Text>
-              </View>
+                <Text style={styles.summaryLabel}>Applicants Needing{"\n"}Inspection</Text>
+                {/* Organized breakdown per municipality */}
+                {Object.keys(inspectBreakdown).length > 0 && (
+                  <View style={{ marginTop: 6, width: '100%' }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {Object.entries(inspectBreakdown).map(([muni, cnt], idx) => {
+                        const muniColors = {
+                          'Labo': '#34c759',
+                          'Jose Panganiban': '#2563eb',
+                          'Paracale': '#f59e0b',
+                          'Daet': '#e11d48',
+                          'San Vicente': '#a21caf',
+                          'Basud': '#0ea5e9',
+                          'Mercedes': '#059669',
+                          'Vinzons': '#f43f5e',
+                          'Sta. Elena': '#f472b6',
+                          'Capalonga': '#6366f1',
+                          'San Lorenzo Ruiz': '#facc15',
+                          'Unknown': '#6b7280',
+                        };
+                        const color = muniColors[muni] || '#25A18E';
+                        return (
+                          <View key={muni} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 10, marginBottom: 4, backgroundColor: color + '22', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}>
+                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color, marginRight: 4 }} />
+                            <Text style={{ fontSize: 12, color: color, fontWeight: 'bold' }}>{cnt}</Text>
+                            <Text style={{ fontSize: 12, color: '#333', marginLeft: 2 }}>{muni}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+              </TouchableOpacity>
             </View>
             <View style={styles.summaryGridRow}>
-              {/* Approved Beneficiaries */}
-              <View style={styles.summaryCard}>
-                <View style={[styles.summaryIconCircle, { backgroundColor: '#E3F4EC' }]}>
+              {/* Beneficiaries in Additional Municipalities */}
+              <TouchableOpacity 
+                style={styles.summaryCard}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setShowBeneficiaries(true);
+                  setShowInspect(false);
+                  setShowForDispersal(false);
+                }}
+              >
+                <View style={[styles.summaryIconCircle, { backgroundColor: '#E3F4EC' }]}> 
                   <Ionicons name="checkmark-done-outline" size={22} color="#25A18E" />
                 </View>
-                <Text style={styles.summaryNumber}>{notifCounts.beneficiaries}</Text>
-                <Text style={styles.summaryLabel}>Approved{'\n'}Beneficiaries</Text>
-              </View>
+                <Text style={styles.summaryNumber}>{notifCounts.beneficiariesAdditional}</Text>
+                <Text style={styles.summaryLabel}>
+                  Beneficiaries{'\n'}in {additionalMunicipalities && additionalMunicipalities.length > 0 ? additionalMunicipalities.join(', ') : 'Other Municipalities'}
+                </Text>
+              </TouchableOpacity>
               {/* Scheduled Dispersals */}
-              <View style={styles.summaryCard}>
-                <View style={[styles.summaryIconCircle, { backgroundColor: '#F5F9F8' }]}>
+              <TouchableOpacity 
+                style={styles.summaryCard}
+                activeOpacity={0.8}
+                onPress={() => {
+                  // Manual navigation: ensure no highlight is shown
+                  setHighlightInspectApplicantId(null);
+                  setHighlightBeneficiaryApplicantId(null);
+                  setHighlightDispersalScheduleId(null);
+                  setShowBeneficiaries(false);
+                  setShowInspect(false);
+                  setShowForDispersal(true);
+                }}
+              >
+                <View style={[styles.summaryIconCircle, { backgroundColor: '#F5F9F8' }]}> 
                   <Ionicons name="calendar-outline" size={22} color="#25A18E" />
                 </View>
                 <Text style={styles.summaryNumber}>{notifCounts.dispersal}</Text>
-                <Text style={styles.summaryLabel}>Scheduled{'\n'}Dispersals</Text>
-              </View>
+                <Text style={styles.summaryLabel}>Scheduled{`\n`}Dispersals</Text>
+                {Object.keys(dispersalBreakdown).length > 0 && (
+                  <View style={{ marginTop: 6, width: '100%' }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {Object.entries(dispersalBreakdown).map(([muni, cnt]) => {
+                        const muniColors = {
+                          'Labo': '#34c759',
+                          'Jose Panganiban': '#2563eb',
+                          'Paracale': '#f59e0b',
+                          'Daet': '#e11d48',
+                          'San Vicente': '#a21caf',
+                          'Basud': '#0ea5e9',
+                          'Mercedes': '#059669',
+                          'Vinzons': '#f43f5e',
+                          'Sta. Elena': '#f472b6',
+                          'Capalonga': '#6366f1',
+                          'San Lorenzo Ruiz': '#facc15',
+                          'Unknown': '#6b7280',
+                        };
+                        const color = muniColors[muni] || '#25A18E';
+                        return (
+                          <View key={muni} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 10, marginBottom: 4, backgroundColor: color + '22', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 }}>
+                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color, marginRight: 4 }} />
+                            <Text style={{ fontSize: 12, color: color, fontWeight: 'bold' }}>{cnt}</Text>
+                            <Text style={{ fontSize: 12, color: '#333', marginLeft: 2 }}>{muni}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
+            {/* New row: Total Beneficiaries in Assigned Municipalities */}
+            <View style={styles.summaryGridRow}>
+              <TouchableOpacity 
+                style={[styles.summaryCard, { width: '100%' }]} /* Full width */
+                activeOpacity={0.8}
+                onPress={() => {
+                  setShowBeneficiaries(true);
+                  setShowInspect(false);
+                  setShowForDispersal(false);
+                }}
+              >
+                <View style={[styles.summaryIconCircle, { backgroundColor: '#E3F4EC' }]}> 
+                  <Ionicons name="people" size={22} color="#25A18E" />
+                </View>
+                <Text style={styles.summaryNumber}>{notifCounts.totalBeneficiaries}</Text>
+                <Text style={styles.summaryLabel}>Total Beneficiaries in Assigned Municipalities</Text>
+              </TouchableOpacity>
             </View>
           </View>
           {/* Analytics Cards */}
@@ -544,6 +725,13 @@ export default function MainScreen({ navigation, route }) {
           <View style={styles.listsSection}>
             {/* List for Dispersal */}
             <View style={styles.listCard}>
+              {/* Small external badge (top-right) */}
+              {notifCounts.dispersal > 0 && (
+                <View style={styles.listBadge}>
+                  <View style={styles.listBadgeDot} />
+                  <Text style={styles.listBadgeText}>{notifCounts.dispersal}</Text>
+                </View>
+              )}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                 <View style={[styles.statIconCircle, { backgroundColor: '#E3F4EC', marginRight: 8 }]}>
                   <Ionicons name="calendar-outline" size={14} color="#25A18E" />
@@ -553,6 +741,10 @@ export default function MainScreen({ navigation, route }) {
               <TouchableOpacity 
                 style={styles.viewListButton}
                 onPress={() => {
+                  // Manual navigation: ensure no highlight is shown
+                  setHighlightInspectApplicantId(null);
+                  setHighlightBeneficiaryApplicantId(null);
+                  setHighlightDispersalScheduleId(null);
                   setShowBeneficiaries(false);
                   setShowInspect(false);
                   setShowForDispersal(true);
@@ -565,6 +757,12 @@ export default function MainScreen({ navigation, route }) {
             
             {/* List to Inspect */}
             <View style={styles.listCard}>
+              {notifCounts.inspect > 0 && (
+                <View style={styles.listBadge}>
+                  <View style={styles.listBadgeDot} />
+                  <Text style={styles.listBadgeText}>{notifCounts.inspect}</Text>
+                </View>
+              )}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                 <View style={[styles.statIconCircle, { backgroundColor: '#E3F4EC', marginRight: 8 }]}>
                   <Ionicons name="clipboard-outline" size={14} color="#25A18E" />
@@ -574,6 +772,10 @@ export default function MainScreen({ navigation, route }) {
               <TouchableOpacity 
                 style={styles.viewListButton}
                 onPress={() => {
+                  // Manual navigation: ensure no highlight is shown
+                  setHighlightInspectApplicantId(null);
+                  setHighlightBeneficiaryApplicantId(null);
+                  setHighlightDispersalScheduleId(null);
                   setShowBeneficiaries(false);
                   setShowInspect(true);
                   setShowForDispersal(false);
@@ -586,6 +788,12 @@ export default function MainScreen({ navigation, route }) {
             
             {/* List of Beneficiaries */}
             <View style={styles.listCard}>
+              {(notifCounts.totalBeneficiaries || notifCounts.beneficiaries || 0) > 0 && (
+                <View style={styles.listBadge}>
+                  <View style={styles.listBadgeDot} />
+                  <Text style={styles.listBadgeText}>{notifCounts.totalBeneficiaries || notifCounts.beneficiaries}</Text>
+                </View>
+              )}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                 <View style={[styles.statIconCircle, { backgroundColor: '#E3F4EC', marginRight: 8 }]}>
                   <Ionicons name="people-outline" size={14} color="#25A18E" />
@@ -595,6 +803,10 @@ export default function MainScreen({ navigation, route }) {
               <TouchableOpacity 
                 style={styles.viewListButton}
                 onPress={() => {
+                  // Manual navigation: ensure no highlight is shown
+                  setHighlightInspectApplicantId(null);
+                  setHighlightBeneficiaryApplicantId(null);
+                  setHighlightDispersalScheduleId(null);
                   setShowBeneficiaries(true);
                   setShowInspect(false);
                   setShowForDispersal(false);
@@ -865,6 +1077,32 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+    position: 'relative',
+  },
+  listBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F9F8',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#E3F4EC',
+  },
+  listBadgeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#25A18E',
+    marginRight: 4,
+  },
+  listBadgeText: {
+    color: '#25A18E',
+    fontWeight: '700',
+    fontSize: 12,
   },
   viewListButton: {
     flexDirection: 'row',

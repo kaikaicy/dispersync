@@ -86,12 +86,19 @@ export default function ListOfBeneficiaries({ highlightApplicantId }) {
   const [search, setSearch] = useState('');
 
   const [staffMunicipality, setStaffMunicipality] = useState(null);
+  const [additionalMunicipalities, setAdditionalMunicipalities] = useState([]); // <-- add this
   const [authReady, setAuthReady] = useState(false);
 
   // Livestock filter state + dropdown
   const [livestockFilter, setLivestockFilter] = useState('all');
   const [livestockPickerOpen, setLivestockPickerOpen] = useState(false);
   const LIVESTOCK_OPTIONS = ['all', 'chicken', 'swine', 'carabao', 'cattle'];
+
+  // Municipality/Barangay filters
+  const [muniFilter, setMuniFilter] = useState('all');
+  const [brgyFilter, setBrgyFilter] = useState('all');
+  const [muniPickerOpen, setMuniPickerOpen] = useState(false);
+  const [brgyPickerOpen, setBrgyPickerOpen] = useState(false);
 
   const [beneficiariesLive, setBeneficiariesLive] = useState([]);
 const [loadingBeneficiariesLive, setLoadingBeneficiariesLive] = useState(true);
@@ -100,22 +107,26 @@ useEffect(() => {
   // Wait until auth is known so we can read staff municipality
   if (!authReady) return;
 
-  // Use Firestore query to filter by municipality field
-  const qRef = staffMunicipality
-    ? query(collection(db, 'beneficiaries'), where('municipality', '==', staffMunicipality))
-    : collection(db, 'beneficiaries');
+  // Show beneficiaries for both main and additional municipalities
+  let muniList = [];
+  if (staffMunicipality) muniList.push(staffMunicipality);
+  if (additionalMunicipalities && additionalMunicipalities.length > 0) {
+    muniList = muniList.concat(additionalMunicipalities);
+  }
+  muniList = muniList.map(m => (m || '').toLowerCase().trim()).filter(Boolean);
 
   const unsub = onSnapshot(
-    qRef,
+    collection(db, 'beneficiaries'),
     (snap) => {
       const rows = snap.docs.map((d) => {
         const data = d.data() || {};
-        
+        const muni = (data.municipality || '').toLowerCase().trim();
+        if (!muniList.includes(muni)) return null;
         return {
           id: d.id,
           name: data.name || data.fullName || '(No name)',
           barangay: data.barangay || null,
-          municipality: data.municipality || null, // Now using the separate municipality field
+          municipality: data.municipality || null,
           address: data.address || null,
           livestock: data.livestock || data.livestocks || null,
           contactNumber: data.contactNumber || null,
@@ -127,8 +138,7 @@ useEffect(() => {
           image: data.image || null,
           raw: data,
         };
-      });
-
+      }).filter(Boolean);
       setBeneficiariesLive(rows);
       setLoadingBeneficiariesLive(false);
     },
@@ -139,9 +149,8 @@ useEffect(() => {
       Alert.alert('Error', err?.message || 'Failed to load beneficiaries.');
     }
   );
-
   return () => unsub();
-}, [authReady, staffMunicipality]);
+}, [authReady, staffMunicipality, additionalMunicipalities]);
 
   // Watch auth → fetch staff/{uid} to get inspector municipality
   useEffect(() => {
@@ -149,6 +158,7 @@ useEffect(() => {
       try {
         if (!user) {
           setStaffMunicipality(null);
+          setAdditionalMunicipalities([]);
           setAuthReady(true);
           return;
         }
@@ -160,10 +170,18 @@ useEffect(() => {
           sData?.location?.municipality ||
           null;
         setStaffMunicipality(typeof muni === 'string' ? muni : null);
+        // Additional municipalities: support array or comma-separated string
+        let addMuni = sData.additionalMunicipalities || sData.additional_municipalities || sData.additionalAreas || [];
+        if (typeof addMuni === 'string') {
+          addMuni = addMuni.split(',').map(m => m.trim()).filter(Boolean);
+        }
+        if (!Array.isArray(addMuni)) addMuni = [];
+        setAdditionalMunicipalities(addMuni);
         setAuthReady(true);
       } catch (e) {
         console.error('Load staff municipality failed:', e);
         setStaffMunicipality(null);
+        setAdditionalMunicipalities([]);
         setAuthReady(true);
       }
     });
@@ -258,12 +276,41 @@ const beneficiariesForStaff = useMemo(() => {
   return beneficiariesLive; // Already filtered by Firestore query
 }, [beneficiariesLive]);
 
-  // Filter by livestock type
+// Dropdown options based on current data
+const municipalityOptions = useMemo(() => {
+  const set = new Set();
+  beneficiariesForStaff.forEach(r => {
+    const m = (r.municipality || '').trim();
+    if (m) set.add(m);
+  });
+  return ['all', ...Array.from(set).sort()];
+}, [beneficiariesForStaff]);
+
+const barangayOptions = useMemo(() => {
+  const set = new Set();
+  beneficiariesForStaff
+    .filter(r => muniFilter === 'all' || (r.municipality || '') === muniFilter)
+    .forEach(r => {
+      const b = (r.barangay || '').trim();
+      if (b) set.add(b);
+    });
+  return ['all', ...Array.from(set).sort()];
+}, [beneficiariesForStaff, muniFilter]);
+
+  // Apply municipality and barangay filters first
+  const locationFiltered = useMemo(() => {
+    let list = beneficiariesForStaff;
+    if (muniFilter !== 'all') list = list.filter(r => (r.municipality || '') === muniFilter);
+    if (brgyFilter !== 'all') list = list.filter(r => (r.barangay || '') === brgyFilter);
+    return list;
+  }, [beneficiariesForStaff, muniFilter, brgyFilter]);
+
+  // Then livestock type
   const livestockFiltered = useMemo(() => {
     const target = livestockFilter.toLowerCase();
-    if (target === 'all') return beneficiariesForStaff;
+    if (target === 'all') return locationFiltered;
 
-    return beneficiariesForStaff.filter((b) => {
+    return locationFiltered.filter((b) => {
       const list = toLivestockArray(b.livestock);
       const normalized = list.map((x) =>
         x
@@ -275,7 +322,7 @@ const beneficiariesForStaff = useMemo(() => {
       );
       return normalized.includes(target);
     });
-  }, [beneficiariesForStaff, livestockFilter]);
+  }, [locationFiltered, livestockFilter]);
 
   // Search by name/barangay
   const filtered = useMemo(() => {
@@ -320,22 +367,50 @@ const beneficiariesForStaff = useMemo(() => {
             flexDirection: 'row',
             justifyContent: 'space-between',
             marginBottom: 10,
+            gap: 8,
           }}
         >
-          {/* Keep Barangay button for future use */}
+          {/* Municipality combobox */}
           <TouchableOpacity
             style={{
               backgroundColor: '#25A18E',
               borderRadius: 8,
               padding: 8,
               flex: 1,
-              marginRight: 8,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
             }}
+            onPress={() => setMuniPickerOpen(true)}
           >
-            <Text style={{ color: '#fff', textAlign: 'center' }}>Barangay</Text>
+            <Text style={{ color: '#fff', textAlign: 'center' }}>
+              {`Municipality: ${muniFilter === 'all' ? 'All' : muniFilter}`}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color="#fff" />
           </TouchableOpacity>
 
-          {/* Livestock "combobox" */}
+          {/* Barangay combobox */}
+          <TouchableOpacity
+            style={{
+              backgroundColor: '#25A18E',
+              borderRadius: 8,
+              padding: 8,
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
+            onPress={() => setBrgyPickerOpen(true)}
+          >
+            <Text style={{ color: '#fff', textAlign: 'center' }}>
+              {`Barangay: ${brgyFilter === 'all' ? 'All' : brgyFilter}`}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color="#fff" />
+          </TouchableOpacity>
+
+          {/* Livestock combobox */}
           <TouchableOpacity
             style={{
               backgroundColor: '#25A18E',
@@ -632,6 +707,125 @@ const beneficiariesForStaff = useMemo(() => {
                   {opt === 'all' ? 'All' : opt}
                 </Text>
                 {livestockFilter === opt && (
+                  <Ionicons name="checkmark" size={18} color="#25A18E" />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Municipality picker */}
+      <Modal
+        visible={muniPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMuniPickerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingHorizontal: 24,
+          }}
+          onPressOut={() => setMuniPickerOpen(false)}
+        >
+          <View
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              width: '100%',
+              maxWidth: 360,
+              paddingVertical: 8,
+            }}
+          >
+            {municipalityOptions.map((opt) => (
+              <TouchableOpacity
+                key={`mun-${opt}`}
+                onPress={() => {
+                  setMuniFilter(opt);
+                  setBrgyFilter('all');
+                  setMuniPickerOpen(false);
+                }}
+                style={{
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 16,
+                    color: '#333',
+                  }}
+                >
+                  {opt === 'all' ? 'All' : opt}
+                </Text>
+                {muniFilter === opt && (
+                  <Ionicons name="checkmark" size={18} color="#25A18E" />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Barangay picker */}
+      <Modal
+        visible={brgyPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBrgyPickerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingHorizontal: 24,
+          }}
+          onPressOut={() => setBrgyPickerOpen(false)}
+        >
+          <View
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              width: '100%',
+              maxWidth: 360,
+              paddingVertical: 8,
+            }}
+          >
+            {barangayOptions.map((opt) => (
+              <TouchableOpacity
+                key={`brgy-${opt}`}
+                onPress={() => {
+                  setBrgyFilter(opt);
+                  setBrgyPickerOpen(false);
+                }}
+                style={{
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 16,
+                    color: '#333',
+                  }}
+                >
+                  {opt === 'all' ? 'All' : opt}
+                </Text>
+                {brgyFilter === opt && (
                   <Ionicons name="checkmark" size={18} color="#25A18E" />
                 )}
               </TouchableOpacity>

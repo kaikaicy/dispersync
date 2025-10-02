@@ -1,7 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { db } from './src/config/firebase';
+import DateTimePicker from '@react-native-community/datetimepicker';
+// Helper to format date as YYYY-MM-DD
+function formatDate(date) {
+  if (!date) return '';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 
@@ -55,6 +66,11 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
   const [deadDate, setDeadDate] = useState('');
   const [surrenderedDate, setSurrenderedDate] = useState('');
   const [monitoringDate, setMonitoringDate] = useState('');
+  // Date picker visibility states
+  const [showDeadDatePicker, setShowDeadDatePicker] = useState(false);
+  const [showSurrenderedDatePicker, setShowSurrenderedDatePicker] = useState(false);
+  const [showMonitoringDatePicker, setShowMonitoringDatePicker] = useState(false);
+  const [showSoldDatePicker, setShowSoldDatePicker] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditingBeneficiary, setIsEditingBeneficiary] = useState(false);
   const [isLoadingBeneficiary, setIsLoadingBeneficiary] = useState(false);
@@ -684,37 +700,79 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
             {selectedStatus.includes('dead') && (
               <View style={styles.formCard}>
                 <Text style={styles.formCardTitle}>Date of Death</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter date of death (YYYY-MM-DD)"
-                  placeholderTextColor={colors.textLight}
-                  value={deadDate}
-                  onChangeText={setDeadDate}
-                />
+                <TouchableOpacity
+                  style={[styles.datePickerButton, { borderColor: colors.border }]}
+                  onPress={() => setShowDeadDatePicker(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.datePickerText, { color: deadDate ? colors.text : colors.textLight }]}> 
+                    {deadDate ? formatDate(deadDate) : 'Pick date of death'}
+                  </Text>
+                  <Ionicons name="calendar" size={20} color={colors.primary} />
+                </TouchableOpacity>
+                {showDeadDatePicker && (
+                  <DateTimePicker
+                    value={deadDate ? new Date(deadDate) : new Date()}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(e, selected) => {
+                      setShowDeadDatePicker(false);
+                      if (selected) setDeadDate(formatDate(selected));
+                    }}
+                  />
+                )}
               </View>
             )}
             {selectedStatus.includes('surrendered') && (
               <View style={styles.formCard}>
                 <Text style={styles.formCardTitle}>Date Surrendered</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter date surrendered (YYYY-MM-DD)"
-                  placeholderTextColor={colors.textLight}
-                  value={surrenderedDate}
-                  onChangeText={setSurrenderedDate}
-                />
+                <TouchableOpacity
+                  style={[styles.datePickerButton, { borderColor: colors.border }]}
+                  onPress={() => setShowSurrenderedDatePicker(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.datePickerText, { color: surrenderedDate ? colors.text : colors.textLight }]}> 
+                    {surrenderedDate ? formatDate(surrenderedDate) : 'Pick date surrendered'}
+                  </Text>
+                  <Ionicons name="calendar" size={20} color={colors.primary} />
+                </TouchableOpacity>
+                {showSurrenderedDatePicker && (
+                  <DateTimePicker
+                    value={surrenderedDate ? new Date(surrenderedDate) : new Date()}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(e, selected) => {
+                      setShowSurrenderedDatePicker(false);
+                      if (selected) setSurrenderedDate(formatDate(selected));
+                    }}
+                  />
+                )}
               </View>
             )}
             {/* Monitoring date field */}
             <View style={styles.formCard}>
               <Text style={styles.formCardTitle}>Monitoring Date</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter monitoring date (YYYY-MM-DD)"
-                placeholderTextColor={colors.textLight}
-                value={monitoringDate}
-                onChangeText={setMonitoringDate}
-              />
+              <TouchableOpacity
+                style={[styles.datePickerButton, { borderColor: colors.border }]}
+                onPress={() => setShowMonitoringDatePicker(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.datePickerText, { color: monitoringDate ? colors.text : colors.textLight }]}> 
+                  {monitoringDate ? formatDate(monitoringDate) : 'Pick monitoring date'}
+                </Text>
+                <Ionicons name="calendar" size={20} color={colors.primary} />
+              </TouchableOpacity>
+              {showMonitoringDatePicker && (
+                <DateTimePicker
+                  value={monitoringDate ? new Date(monitoringDate) : new Date()}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(e, selected) => {
+                    setShowMonitoringDatePicker(false);
+                    if (selected) setMonitoringDate(formatDate(selected));
+                  }}
+                />
+              )}
             </View>
           </View>
 
@@ -780,36 +838,50 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
           )}
 
           {selectedStatus.includes('sold') && (
-                <View style={styles.formCard}>
-                  <Text style={styles.formCardTitle}>Sale Information</Text>
-                  <Text style={styles.formCardSubtitle}>
+            <View style={styles.formCard}>
+              <Text style={styles.formCardTitle}>Sale Information</Text>
+              <Text style={styles.formCardSubtitle}>
                 Beneficiary's Share – 30% (B30%S)
               </Text>
               <TextInput
-                    style={styles.input}
-                    placeholder="Enter amount sold (₱)"
+                style={styles.input}
+                placeholder="Enter amount sold (₱)"
                 placeholderTextColor={colors.textLight}
                 value={soldAmount}
                 onChangeText={setSoldAmount}
                 keyboardType="numeric"
               />
               {soldAmount !== '' && !isNaN(Number(soldAmount)) && (
-                    <View style={styles.calculationCard}>
-                      <Text style={styles.calculationLabel}>30% Share:</Text>
-                      <Text style={styles.calculationValue}>
-                        ₱{Number(soldAmount) * 0.3}
-                </Text>
-                    </View>
-              )}
-              <TextInput
-                    style={styles.input}
-                    placeholder="Enter date sold (YYYY-MM-DD)"
-                placeholderTextColor={colors.textLight}
-                value={soldDate}
-                onChangeText={setSoldDate}
-              />
+                <View style={styles.calculationCard}>
+                  <Text style={styles.calculationLabel}>30% Share:</Text>
+                  <Text style={styles.calculationValue}>
+                    ₱{Number(soldAmount) * 0.3}
+                  </Text>
                 </View>
               )}
+              <TouchableOpacity
+                style={[styles.datePickerButton, { borderColor: colors.border }]}
+                onPress={() => setShowSoldDatePicker(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.datePickerText, { color: soldDate ? colors.text : colors.textLight }]}> 
+                  {soldDate ? formatDate(soldDate) : 'Pick date sold'}
+                </Text>
+                <Ionicons name="calendar" size={20} color={colors.primary} />
+              </TouchableOpacity>
+              {showSoldDatePicker && (
+                <DateTimePicker
+                  value={soldDate ? new Date(soldDate) : new Date()}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(e, selected) => {
+                    setShowSoldDatePicker(false);
+                    if (selected) setSoldDate(formatDate(selected));
+                  }}
+                />
+              )}
+            </View>
+          )}
             </View>
           )}
 
@@ -942,6 +1014,24 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#e6f4f1',
+  },
+  datePickerButton: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E3F4EC',
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  datePickerText: {
+    fontSize: 15,
+    color: '#25A18E',
+    flex: 1,
   },
   header: {
     flexDirection: 'row',

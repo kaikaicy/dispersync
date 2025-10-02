@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, TextInput, Image, ScrollView, StyleSheet, SafeAreaView, Platform, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, Image, ScrollView, StyleSheet, SafeAreaView, Platform, Alert, ActivityIndicator, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { auth, db } from './src/config/firebase';
@@ -38,6 +38,13 @@ export default function ListToInspect({ highlightApplicantId }) {
   const [eligibility, setEligibility] = useState(Array(eligibilityCriteria.length).fill(false));
   const [site, setSite] = useState(Array(siteSuitability.length).fill(false));
   const [highlightId, setHighlightId] = useState(null);
+  // Filters
+  const [muniFilter, setMuniFilter] = useState('all');
+  const [brgyFilter, setBrgyFilter] = useState('all');
+  const [livestockFilter, setLivestockFilter] = useState('all');
+  const [muniPickerOpen, setMuniPickerOpen] = useState(false);
+  const [brgyPickerOpen, setBrgyPickerOpen] = useState(false);
+  const [livestockPickerOpen, setLivestockPickerOpen] = useState(false);
 
   useEffect(() => {
     if (highlightApplicantId) {
@@ -338,6 +345,32 @@ export default function ListToInspect({ highlightApplicantId }) {
 
       {/* Applicants List */}
       <View style={{ flex: 1, padding: 16 }}>
+        {/* Filters row */}
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+          <TouchableOpacity
+            style={{ backgroundColor: colors.white, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.border, flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+            onPress={() => setMuniPickerOpen(true)}
+          >
+            <Text style={{ color: colors.text }}>{`Municipality: ${muniFilter === 'all' ? 'All' : muniFilter}`}</Text>
+            <Ionicons name="chevron-down" size={16} color={colors.textLight} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ backgroundColor: colors.white, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.border, flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+            onPress={() => setBrgyPickerOpen(true)}
+          >
+            <Text style={{ color: colors.text }}>{`Barangay: ${brgyFilter === 'all' ? 'All' : brgyFilter}`}</Text>
+            <Ionicons name="chevron-down" size={16} color={colors.textLight} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ backgroundColor: colors.white, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.border, flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+            onPress={() => setLivestockPickerOpen(true)}
+          >
+            <Text style={{ color: colors.text }}>{`Livestock: ${livestockFilter === 'all' ? 'All' : livestockFilter.charAt(0).toUpperCase() + livestockFilter.slice(1)}`}</Text>
+            <Ionicons name="chevron-down" size={16} color={colors.textLight} />
+          </TouchableOpacity>
+        </View>
         {loading ? (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
             <ActivityIndicator size="large" color="#25A18E" />
@@ -355,7 +388,33 @@ export default function ListToInspect({ highlightApplicantId }) {
           </View>
         ) : (
           <ScrollView showsVerticalScrollIndicator={false}>
-            {applicants.map((applicant, index) => (
+            {(
+              (() => {
+                // Build options and apply filters inline to avoid extra state effects
+                const muniOptionsSet = new Set();
+                const brgyOptionsSet = new Set();
+                applicants.forEach(a => {
+                  const m = (a.municipality || a.municipalityName || a.area || '').trim();
+                  if (m) muniOptionsSet.add(m);
+                  if (!muniFilter || muniFilter === 'all' || m === muniFilter) {
+                    const b = (a.barangay || '').trim();
+                    if (b) brgyOptionsSet.add(b);
+                  }
+                });
+                const muniOptions = ['all', ...Array.from(muniOptionsSet).sort()];
+                const brgyOptions = ['all', ...Array.from(brgyOptionsSet).sort()];
+
+                // Expose options on component for modals below via closure variables
+                renderListView.muniOptions = muniOptions;
+                renderListView.brgyOptions = brgyOptions;
+
+                let list = applicants;
+                if (muniFilter !== 'all') list = list.filter(a => (a.municipality || a.municipalityName || a.area || '') === muniFilter);
+                if (brgyFilter !== 'all') list = list.filter(a => (a.barangay || '') === brgyFilter);
+                if (livestockFilter !== 'all') list = list.filter(a => String(a.livestock || a.livestocks || '').toLowerCase() === livestockFilter);
+                return list;
+              })()
+            ).map((applicant, index) => (
               <TouchableOpacity
                 key={applicant.id}
                 style={[
@@ -385,7 +444,10 @@ export default function ListToInspect({ highlightApplicantId }) {
                       {applicant.age ? `${applicant.age} years old` : 'Age not specified'} • {applicant.gender || applicant.sex || 'Gender not specified'}
                     </Text>
                     <Text style={styles.applicantAddress}>
-                      {applicant.address || 'Address not specified'}
+                      {[
+                        applicant.barangay || null,
+                        applicant.municipality || applicant.municipalityName || applicant.area || null
+                      ].filter(Boolean).join(', ') || applicant.address || 'Address not specified'}
                     </Text>
                   </View>
                   <View style={styles.applicantStatus}>
@@ -550,6 +612,103 @@ export default function ListToInspect({ highlightApplicantId }) {
   return (
     <View style={{ flex: 1, backgroundColor: '#FFFFE0' }}>
       {showInspect ? renderInspectForm() : renderListView()}
+
+      {/* Municipality picker */}
+      <Modal
+        visible={muniPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMuniPickerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}
+          onPressOut={() => setMuniPickerOpen(false)}
+        >
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, width: '100%', maxWidth: 360, paddingVertical: 8 }}>
+            {(renderListView.muniOptions || ['all']).map((opt) => (
+              <TouchableOpacity
+                key={`muni-${opt}`}
+                onPress={() => {
+                  setMuniFilter(opt);
+                  setBrgyFilter('all');
+                  setMuniPickerOpen(false);
+                }}
+                style={{ paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <Text style={{ fontSize: 16, color: '#333' }}>{opt === 'all' ? 'All' : opt}</Text>
+                {muniFilter === opt && (
+                  <Ionicons name="checkmark" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Barangay picker */}
+      <Modal
+        visible={brgyPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBrgyPickerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}
+          onPressOut={() => setBrgyPickerOpen(false)}
+        >
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, width: '100%', maxWidth: 360, paddingVertical: 8 }}>
+            {(renderListView.brgyOptions || ['all']).map((opt) => (
+              <TouchableOpacity
+                key={`brgy-${opt}`}
+                onPress={() => {
+                  setBrgyFilter(opt);
+                  setBrgyPickerOpen(false);
+                }}
+                style={{ paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <Text style={{ fontSize: 16, color: '#333' }}>{opt === 'all' ? 'All' : opt}</Text>
+                {brgyFilter === opt && (
+                  <Ionicons name="checkmark" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Livestock picker */}
+      <Modal
+        visible={livestockPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLivestockPickerOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}
+          onPressOut={() => setLivestockPickerOpen(false)}
+        >
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, width: '100%', maxWidth: 360, paddingVertical: 8 }}>
+            {['all', 'chicken', 'swine', 'carabao', 'cattle'].map((opt) => (
+              <TouchableOpacity
+                key={`liv-${opt}`}
+                onPress={() => {
+                  setLivestockFilter(opt);
+                  setLivestockPickerOpen(false);
+                }}
+                style={{ paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <Text style={{ fontSize: 16, color: '#333', textTransform: opt === 'all' ? 'none' : 'capitalize' }}>{opt === 'all' ? 'All' : opt}</Text>
+                {livestockFilter === opt && (
+                  <Ionicons name="checkmark" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }

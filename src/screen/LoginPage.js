@@ -248,6 +248,15 @@ export default function LoginPage({ navigation, route }) {
               </View>
             </View>
 
+            {/* Forgot Password Link (below password input, right-aligned) */}
+            <TouchableOpacity
+              style={styles.forgotPasswordContainer}
+              onPress={() => setShowForgotPassword(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+            </TouchableOpacity>
+
             {/* Login Button */}
             <TouchableOpacity
               style={[styles.loginButton, submitting && { opacity: 0.6 }]}
@@ -258,15 +267,6 @@ export default function LoginPage({ navigation, route }) {
               <Text style={styles.loginButtonText}>
                 {submitting ? "Logging in..." : "Login"}
               </Text>
-            </TouchableOpacity>
-
-            {/* Forgot Password Link */}
-            <TouchableOpacity
-              style={styles.forgotPasswordContainer}
-              onPress={() => setShowForgotPassword(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -482,14 +482,17 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   forgotPasswordContainer: {
-    marginTop: 16,
-    padding: 8,
+    width: '100%',
+    marginTop: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-end',
   },
   forgotPasswordText: {
     color: '#459C8F',
-    fontSize: 15,
-    fontWeight: '500',
-    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'right',
+    textDecorationLine: 'underline',
   },
   // Modal styles
   modalOverlay: {
