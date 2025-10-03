@@ -7,7 +7,6 @@ import { collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc } fro
 import { onAuthStateChanged } from 'firebase/auth';
 
   const eligibilityCriteria = [
-    "Beneficiary is not a senior citizen (below 60)",
     "Farmer",
     "Physically capable to care for livestock",
     "No full-time job or duty conflict",
@@ -522,7 +521,21 @@ export default function ListToInspect({ highlightApplicantId }) {
                 </Text>
                 <Text style={[styles.applicantInfoText, { color: colors.text }]}>
                   <Text style={[styles.applicantInfoLabel, { color: colors.primary }]}>Address: </Text>
-                  {selectedApplicant.address || 'N/A'}
+                  {(() => {
+                    if (selectedApplicant.address) {
+                      return selectedApplicant.address;
+                    }
+                    
+                    // Construct address from separate fields
+                    const parts = [];
+                    if (selectedApplicant.street) parts.push(selectedApplicant.street);
+                    if (selectedApplicant.purok) parts.push(`Purok ${selectedApplicant.purok}`);
+                    if (selectedApplicant.barangay) parts.push(selectedApplicant.barangay);
+                    if (selectedApplicant.municipality) parts.push(selectedApplicant.municipality);
+                    
+                    const fullAddress = parts.length > 0 ? parts.join(', ') : '';
+                    return fullAddress || 'No Address Provided';
+                  })()}
                 </Text>
               </View>
             </View>
@@ -691,7 +704,7 @@ export default function ListToInspect({ highlightApplicantId }) {
           onPressOut={() => setLivestockPickerOpen(false)}
         >
           <View style={{ backgroundColor: '#fff', borderRadius: 12, width: '100%', maxWidth: 360, paddingVertical: 8 }}>
-            {['all', 'chicken', 'swine', 'carabao', 'cattle'].map((opt) => (
+            {['all',  'swine', 'carabao', 'cattle'].map((opt) => (
               <TouchableOpacity
                 key={`liv-${opt}`}
                 onPress={() => {

@@ -468,7 +468,18 @@ export default function MainScreen({ navigation, route }) {
       return <ListToInspect highlightApplicantId={highlightInspectApplicantId} />;
     }
     if (showForDispersal) {
-      return <ListForDispersal highlightScheduleId={highlightDispersalScheduleId} />;
+      return <ListForDispersal 
+        highlightScheduleId={highlightDispersalScheduleId} 
+        onScanPress={() => {
+          setActiveTab('Scan');
+          setShowNotifications(false);
+          setShowBeneficiaries(false);
+          setShowInspect(false);
+          setShowForDispersal(false);
+          setShowTransactionScreen(null);
+          setScannedUID(null);
+        }}
+      />;
     }
     
     // Finally check the active tab

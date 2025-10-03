@@ -28,7 +28,7 @@ const chunk = (arr, size = 10) =>
     arr.slice(i * size, i * size + size)
   );
 
-export default function ListForDispersal({ highlightScheduleId }) {
+export default function ListForDispersal({ highlightScheduleId, onScanPress }) {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedApplicant, setSelectedApplicant] = useState(null);
 
@@ -420,9 +420,32 @@ export default function ListForDispersal({ highlightScheduleId }) {
               marginBottom: 20,
             }}>
               <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#25A18E' }}>Applicant Details</Text>
-              <TouchableOpacity onPress={() => setIsModalVisible(false)}>
-                <Ionicons name="close" size={24} color="#666" />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity 
+                  onPress={() => {
+                    setIsModalVisible(false);
+                    // Trigger the scanner functionality
+                    if (onScanPress) {
+                      onScanPress();
+                    }
+                  }}
+                  style={{
+                    backgroundColor: '#25A18E',
+                    borderRadius: 8,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    marginRight: 8,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Ionicons name="scan" size={16} color="#fff" style={{ marginRight: 4 }} />
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Scan</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setIsModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="#666" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             {selectedApplicant && (

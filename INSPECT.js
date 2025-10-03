@@ -20,7 +20,6 @@ import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const eligibilityCriteria = [
-  'Beneficiary is not a senior citizen (below 60)',
   'Farmer',
   'Physically capable to care for livestock',
   'No full-time job or duty conflict',

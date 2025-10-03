@@ -92,7 +92,7 @@ export default function ListOfBeneficiaries({ highlightApplicantId }) {
   // Livestock filter state + dropdown
   const [livestockFilter, setLivestockFilter] = useState('all');
   const [livestockPickerOpen, setLivestockPickerOpen] = useState(false);
-  const LIVESTOCK_OPTIONS = ['all', 'chicken', 'swine', 'carabao', 'cattle'];
+  const LIVESTOCK_OPTIONS = ['all', 'swine', 'carabao', 'cattle'];
 
   // Municipality/Barangay filters
   const [muniFilter, setMuniFilter] = useState('all');

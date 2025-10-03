@@ -294,6 +294,30 @@ function NotificationItem({ n, onGoTo, onMarkRead, onDelete }) {
           }
         }
       }
+
+      // Special handling for "Inspection Form Approved" notifications
+      if (n.title?.toLowerCase().includes('inspection form approved') && n.refId) {
+        // Check if applicant is already in dispersalSchedules
+        // Use simpler query to avoid composite index requirement
+        const dispersalSchedQuery = query(
+          collection(db, 'dispersalSchedules'),
+          where('applicantId', '==', n.refId)
+        );
+        const dispersalSchedSnap = await getDocs(dispersalSchedQuery);
+        
+        // Filter results in code to check for non-completed status
+        const pendingSchedules = dispersalSchedSnap.docs.filter(doc => {
+          const data = doc.data();
+          return data.status !== 'completed';
+        });
+        
+        if (pendingSchedules.length === 0) {
+          if (!n.read) onMarkRead?.();
+          Alert.alert('Waiting for Scheduling', 'Waiting to be scheduled for dispersal');
+          return;
+        }
+      }
+
       if (!n.read) onMarkRead?.();
       
       // Enhanced navigation with scroll target and highlight data

@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, ActionSheetIOS, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth, db } from './src/config/firebase';
+import { auth, db, storage } from './src/config/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 
 const avatar = require('./assets/images/chick.png'); // Placeholder avatar image
 
@@ -11,6 +14,8 @@ export default function ProfileScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [profilePic, setProfilePic] = useState(null);
+  const [uploadingPic, setUploadingPic] = useState(false);
 
   useEffect(() => {
     let unsubscribeDoc = null;
@@ -37,6 +42,7 @@ export default function ProfileScreen({ navigation }) {
             barangay: data.barangay || '',
             status: data.status || '',
             additionalMunicipalities: Array.isArray(data.additionalMunicipalities) ? data.additionalMunicipalities : undefined,
+            profilePicUrl: data.profilePicUrl || null,
           });
           setError('');
         }
@@ -60,6 +66,181 @@ export default function ProfileScreen({ navigation }) {
       // ignore
     }
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+  };
+
+  const showActionSheet = () => {
+    const options = ['Take Photo', 'Choose from Gallery', 'Cancel'];
+    const cancelButtonIndex = 2;
+    
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          cancelButtonIndex,
+          title: 'Change Profile Picture',
+          destructiveButtonIndex: undefined,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 0) {
+            takePicture();
+          } else if (buttonIndex === 1) {
+            chooseFromGallery();
+          }
+        }
+      );
+    } else {
+      // For Android, show a custom alert with options
+      Alert.alert(
+        'Change Profile Picture',
+        'How would you like to update your profile picture?',
+        [
+          { text: 'Take Photo', onPress: takePicture },
+          { text: 'Choose from Gallery', onPress: chooseFromGallery },
+          { text: 'Cancel', style: 'cancel' }
+        ]
+      );
+    }
+  };
+
+  const takePicture = async () => {
+    try {
+      setUploadingPic(true);
+      
+      // Request camera permission
+      const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
+      
+      if (cameraPermission.status !== 'granted') {
+        Alert.alert(
+          'Camera Permission Required',
+          'Please grant camera permission to take a photo.',
+          [{ text: 'OK' }]
+        );
+        setUploadingPic(false);
+        return;
+      }
+
+      // Launch camera
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+        base64: false,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        await uploadProfilePicture(result.assets[0]);
+      }
+    } catch (error) {
+      console.error('Error taking picture:', error);
+      Alert.alert('Error', 'Failed to take picture. Please try again.');
+    } finally {
+      setUploadingPic(false);
+    }
+  };
+
+  const chooseFromGallery = async () => {
+    try {
+      setUploadingPic(true);
+      
+      // Request media library permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Please grant permission to access your photo library.',
+          [{ text: 'OK' }]
+        );
+        setUploadingPic(false);
+        return;
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+        base64: false,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        await uploadProfilePicture(result.assets[0]);
+      }
+    } catch (error) {
+      console.error('Error choosing image:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    } finally {
+      setUploadingPic(false);
+    }
+  };
+
+  const uploadProfilePicture = async (imageAsset) => {
+    try {
+      // Check authentication first
+      if (!auth.currentUser) {
+        Alert.alert('Authentication Error', 'You must be signed in to update your profile picture.');
+        return;
+      }
+
+      // Convert asset to blob
+      const response = await fetch(imageAsset.uri);
+      
+      if (!response.ok) {
+        throw new Error('Failed to process image');
+      }
+      
+      const blob = await response.blob();
+      
+      // Validate file size (max 5MB)
+      if (blob.size > 5 * 1024 * 1024) {
+        Alert.alert('File Too Large', 'Please choose an image smaller than 5MB.');
+        return;
+      }
+      
+      let downloadUrl = null;
+      
+      // Try profile-pics path first
+      try {
+        const fileName = `profile-pics/${user.userId}/${Date.now()}_${user.userId}.jpg`;
+        const storageRef = ref(storage, fileName);
+        await uploadBytes(storageRef, blob);
+        downloadUrl = await getDownloadURL(storageRef);
+      } catch (profilePicError) {
+        console.warn('Profile-pics path failed, trying images path:', profilePicError);
+        
+        // Fallback to images path (which we know works from other uploads)
+        const fileName = `images/profile_${Date.now()}_${user.userId}.jpg`;
+        const storageRef = ref(storage, fileName);
+        await uploadBytes(storageRef, blob);
+        downloadUrl = await getDownloadURL(storageRef);
+      }
+      
+      // Update Firestore document
+      const userDocRef = doc(db, 'staff', auth.currentUser.uid);
+      await updateDoc(userDocRef, {
+        profilePicUrl: downloadUrl,
+        lastUpdated: new Date().toISOString(),
+      });
+      
+      // Update local state
+      setUser(prev => ({ ...prev, profilePicUrl: downloadUrl }));
+      
+      Alert.alert(
+        'Success', 
+        'Your profile picture has been updated successfully!',
+        [{ text: 'OK', style: 'default' }]
+      );
+      
+    } catch (error) {
+      console.error('Error uploading profile picture:', error);
+      Alert.alert(
+        'Upload Failed', 
+        'We couldn\'t update your profile picture. Please check your internet connection and try again.',
+        [{ text: 'Try Again', onPress: showActionSheet }, { text: 'Cancel', style: 'cancel' }]
+      );
+    }
   };
 
   let roleText = '';
@@ -97,7 +278,19 @@ export default function ProfileScreen({ navigation }) {
         ) : (
           <>
             <View style={styles.avatarSection}>
-              <Image source={avatar} style={styles.avatar} />
+              <TouchableOpacity style={styles.avatarContainer} onPress={showActionSheet} disabled={uploadingPic}>
+                <Image 
+                  source={user?.profilePicUrl ? { uri: user.profilePicUrl } : avatar} 
+                  style={styles.avatar} 
+                />
+                <View style={styles.cameraIconContainer}>
+                  {uploadingPic ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="camera" size={16} color="#fff" />
+                  )}
+                </View>
+              </TouchableOpacity>
               <Text style={styles.name}>{user?.name}</Text>
               {!!roleText && <Text style={styles.roleText}>{roleText}</Text>}
               <View style={styles.badgeRow}>
@@ -284,6 +477,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 18,
   },
+  avatarContainer: {
+    position: 'relative',
+    marginBottom: 10,
+  },
   avatar: {
     width: 96,
     height: 96,
@@ -291,7 +488,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#E3F4EC',
     borderWidth: 3,
     borderColor: '#E3F4EC',
-    marginBottom: 10,
+  },
+  cameraIconContainer: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: '#25A18E',
+    borderRadius: 16,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   name: {
     fontSize: 20,
