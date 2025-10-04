@@ -149,6 +149,15 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
 
   const [isLoadingScheduled, setIsLoadingScheduled] = useState(false);
 
+  // Add sex options for dropdown
+  const sexOptions = [
+    { value: 'Male', label: 'Male' },
+    { value: 'Female', label: 'Female' },
+  ];
+
+  // Add sex state
+  const [livestockSex, setLivestockSex] = useState('');
+
   // ————————————————————————————————————————
   // Get staff municipality on auth state change
   // ————————————————————————————————————————
@@ -183,25 +192,41 @@ export default function Dispersal({ navigation, onBackToTransactions, scannedUID
     const loadScheduledApplicants = async () => {
       setIsLoadingApplicants(true);
       try {
-        // Get all scheduled applicants for the staff's municipality
-        const schedulesQuery = query(
-          collection(db, 'dispersalSchedules'),
-          where('municipality', '==', staffMunicipality)
-        );
-        const schedulesSnap = await getDocs(schedulesQuery);
-        
-        if (schedulesSnap.empty) {
-          console.log('No scheduled applicants found for municipality:', staffMunicipality);
-          setApplicantResults([]);
-          return;
+        // Get staff's additional municipalities (if any)
+        let municipalities = [staffMunicipality];
+        try {
+          const staffRef = collection(db, 'staff');
+          const q = query(staffRef, where('municipality', '==', staffMunicipality));
+          const snap = await getDocs(q);
+          const staffDoc = snap.docs[0]?.data();
+          if (staffDoc?.additionalMunicipalities && Array.isArray(staffDoc.additionalMunicipalities)) {
+            municipalities = Array.from(new Set([
+              staffMunicipality,
+              ...staffDoc.additionalMunicipalities.filter(m => typeof m === 'string' && m.trim())
+            ]));
+          }
+        } catch (e) {
+          // fallback: just use staffMunicipality
         }
 
-        // Convert to dropdown format and sort by scheduledFor
-        const schedules = schedulesSnap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })).sort((a, b) => {
-          // Sort by scheduledFor timestamp
+        // Query all schedules for all municipalities
+        let schedules = [];
+        for (const muni of municipalities) {
+          const schedulesQuery = query(
+            collection(db, 'dispersalSchedules'),
+            where('municipality', '==', muni)
+          );
+          const schedulesSnap = await getDocs(schedulesQuery);
+          schedules = schedules.concat(
+            schedulesSnap.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }))
+          );
+        }
+
+        // Sort by scheduledFor timestamp
+        schedules.sort((a, b) => {
           const aTime = a.scheduledFor?.toDate ? a.scheduledFor.toDate() : new Date(a.scheduledFor || 0);
           const bTime = b.scheduledFor?.toDate ? b.scheduledFor.toDate() : new Date(b.scheduledFor || 0);
           return aTime - bTime;
@@ -363,6 +388,7 @@ const handleSubmit = async () => {
         color: livestockColor.trim() || null,
         age: livestockAge ? Number(livestockAge) : null,
         breed: livestockBreed.trim() || null,
+        sex: livestockSex || null,
         markings: livestockMarkings.trim() || null,
       },
 
@@ -475,6 +501,28 @@ const handleSubmit = async () => {
     disabled: '#BDC3C7',
   };
 
+  // Breed options mapping (no duplicates)
+const breedOptionsByLivestock = {
+  'Cattle': [
+    { value: 'Dairy', label: 'Dairy' },
+    { value: 'Upgraded', label: 'Upgraded' },
+  ],
+  'Carabao': [
+    { value: 'Upgraded', label: 'Upgraded' },
+    { value: 'Murrah', label: 'Murrah' },
+  ],
+  'Swine': [
+    { value: 'Landrace', label: 'Landrace' },
+    { value: 'Large White', label: 'Large White' },
+    { value: 'Duroc', label: 'Duroc' },
+  ],
+};
+
+  // Dynamically reset breed when livestock type changes
+useEffect(() => {
+  setLivestockBreed('');
+}, [livestockType]);
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {/* Fixed Header */}
@@ -532,23 +580,65 @@ const handleSubmit = async () => {
               </Text>
             )}
 
-            {/* Livestock Type (prefilled/overridable) */}
-            <Text style={[styles.inputLabel, { color: colors.primary }]}>Livestock Type</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-              placeholder="e.g. Cattle / Swine / Carabao / Chicken"
-              value={livestockType}
-              onChangeText={setLivestockType}
-              placeholderTextColor={colors.textLight}
-            />
-            {livestockType && isLoadingScheduled && (
-              <Text style={{ alignSelf: 'flex-start', marginTop: -12, marginBottom: 8, color: colors.textLight, fontSize: 12 }}>
-                Pre-filled from schedule
+            {/* Livestock Type and Breed Group */}
+            <View style={{ marginBottom: 16 }}>
+              <Text style={[styles.inputLabel, { color: colors.primary }]}>Livestock Type</Text>
+              <TextInput
+                style={[styles.input, { borderColor: colors.border, color: colors.text }]}
+                placeholder="e.g. Cattle / Swine / Carabao / Chicken"
+                value={livestockType}
+                onChangeText={text => setLivestockType(text)}
+                placeholderTextColor={colors.textLight}
+              />
+              {livestockType && isLoadingScheduled && (
+                <Text style={{ alignSelf: 'flex-start', marginTop: -12, marginBottom: 8, color: colors.textLight, fontSize: 12 }}>
+                  Pre-filled from schedule
+                </Text>
+              )}
+
+              {/* Breed Dropdown - grouped under Livestock Type */}
+              <Text style={[styles.inputLabel, { color: colors.primary, marginTop: 8 }]}>Breed</Text>
+              <Text style={{ alignSelf: 'flex-start', marginTop: -6, marginBottom: 8, color: colors.textLight, fontSize: 12 }}>
+                (Breed of livestock)
               </Text>
-            )}
+              <DropdownListComponent
+                label=""
+                placeholder="Select breed"
+                options={
+                  Array.from(
+                    new Map(
+                      (breedOptionsByLivestock[livestockType?.trim().charAt(0).toUpperCase() + livestockType?.trim().slice(1)] || [])
+                        .map(b => [b.label, b])
+                    ).values()
+                  )
+                }
+                selectedValue={livestockBreed}
+                onSelect={option => setLivestockBreed(option.value)}
+                searchable={false}
+                emptyMessage="No breeds available for selected livestock."
+              />
+
+              {/* Sex Dropdown */}
+              <Text style={[styles.inputLabel, { color: colors.primary, marginTop: 8 }]}>Sex</Text>
+              <Text style={{ alignSelf: 'flex-start', marginTop: -6, marginBottom: 8, color: colors.textLight, fontSize: 12 }}>
+                (Sex of livestock)
+              </Text>
+              <DropdownListComponent
+                label=""
+                placeholder="Select sex"
+                options={sexOptions}
+                selectedValue={livestockSex}
+                onSelect={option => setLivestockSex(option.value)}
+                searchable={false}
+                emptyMessage="Please select sex."
+              />
+            </View>
 
             {/* Extra Livestock Details */}
             <Text style={[styles.inputLabel, { color: colors.primary }]}>Color</Text>
+            <Text style={{ alignSelf: 'flex-start', marginTop: -6, marginBottom: 8, color: colors.textLight, fontSize: 12 }}>
+              (Color of livestock)
+            </Text>
             <TextInput
               style={[styles.input, { borderColor: colors.border, color: colors.text }]}
               placeholder="e.g. Brown"
@@ -558,6 +648,9 @@ const handleSubmit = async () => {
             />
 
             <Text style={[styles.inputLabel, { color: colors.primary }]}>Age</Text>
+            <Text style={{ alignSelf: 'flex-start', marginTop: -6, marginBottom: 8, color: colors.textLight, fontSize: 12 }}>
+              (Age of livestock)
+            </Text>
             <TextInput
               style={[styles.input, { borderColor: colors.border, color: colors.text }]}
               placeholder="e.g. 2"
@@ -567,16 +660,10 @@ const handleSubmit = async () => {
               placeholderTextColor={colors.textLight}
             />
 
-            <Text style={[styles.inputLabel, { color: colors.primary }]}>Breed</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-              placeholder="e.g. Native"
-              value={livestockBreed}
-              onChangeText={setLivestockBreed}
-              placeholderTextColor={colors.textLight}
-            />
-
             <Text style={[styles.inputLabel, { color: colors.primary }]}>Distinct Markings / Notes</Text>
+            <Text style={{ alignSelf: 'flex-start', marginTop: -6, marginBottom: 8, color: colors.textLight, fontSize: 12 }}>
+              (Unique markings or notes about the livestock)
+            </Text>
             <TextInput
               style={[styles.input, { borderColor: colors.border, color: colors.text }]}
               placeholder="e.g. White patch on forehead"

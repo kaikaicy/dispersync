@@ -225,7 +225,7 @@ export default function Transaction({ navigation, onSelectTransaction, scannedUI
                 onPress={() => onSelectTransaction('Dispersal')}
               />
             ) : (
-              // For existing cards, show Cull and Status buttons
+              // For existing cards, show Cull, Status, Redispersal, and Transfer buttons
               <>
                 <TransactionButton 
                   icon="medkit"
@@ -237,6 +237,18 @@ export default function Transaction({ navigation, onSelectTransaction, scannedUI
                   icon="pulse"
                   title="Add Status"
                   onPress={() => onSelectTransaction('Status')}
+                />
+
+                <TransactionButton 
+                  icon="repeat"
+                  title="Redispersal"
+                  onPress={() => onSelectTransaction('Redispersal')}
+                />
+
+                <TransactionButton 
+                  icon="swap-horizontal"
+                  title="Transfer"
+                  onPress={() => onSelectTransaction('Transfer')}
                 />
               </>
             )}
@@ -433,4 +445,4 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 14,
   },
-}); 
+});

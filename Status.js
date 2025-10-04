@@ -29,7 +29,6 @@ const statusOptions = [
   { label: 'Dead', key: 'dead', icon: 'close-circle' },
   { label: 'Surrendered(SURR)', key: 'surrendered', icon: 'hand-left' },
   { label: 'Pregnant(PREG)', key: 'pregnant', icon: 'heart' },
-  { label: 'Sold', key: 'sold', icon: 'cash' },
   { label: 'With Calf(WC)', key: 'with_calf', icon: 'paw' },
 ];
 
@@ -101,6 +100,10 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
     health: 'Healthy',
     dateDisperse: null,
   });
+
+  // Add state for Re-Dispersal and Transfer checkboxes
+  const [isRedispersalChecked, setIsRedispersalChecked] = useState(false);
+  const [isTransferChecked, setIsTransferChecked] = useState(false);
 
   // Fetch beneficiary data when scannedUID changes
   useEffect(() => {
@@ -233,16 +236,9 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
       }
       return;
     }
-    if (selectedStatus.includes('sold')) {
-      // If sold is selected, only allow unchecking it
-      if (key === 'sold') {
-        setSelectedStatus(selectedStatus.filter(k => k !== 'sold'));
-      }
-      return;
-    }
     if (selectedStatus.includes('existing')) {
       // Only allow toggling enabled checkboxes
-      if (['pregnant', 'surrendered', 'sold', 'with_calf', 'existing'].includes(key)) {
+      if (['pregnant', 'surrendered', 'with_calf', 'existing'].includes(key)) {
         if (selectedStatus.includes(key)) {
           setSelectedStatus(selectedStatus.filter(k => k !== key));
         } else {
@@ -273,24 +269,30 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
 
   const isStatusDisabled = (key) => {
     if (selectedStatus.includes('cannot_found')) {
-      // Unknown disables all others
-      return !selectedStatus.includes(key);
+      // Only "Cannot be found(UK)" can be toggled, all others are disabled
+      return key !== 'cannot_found';
     }
     if (selectedStatus.includes('existing')) {
-      // Only pregnant, surrendered, sold, with calf are enabled
-      return !['pregnant', 'surrendered', 'sold', 'with_calf', 'existing'].includes(key);
+      // Only allow toggling enabled checkboxes
+      if (['pregnant', 'surrendered', 'with_calf', 'existing'].includes(key)) {
+        return false; // Enabled if one of the allowed statuses
+      }
+      return true; // Disabled if not in the allowed list
     }
     if (selectedStatus.includes('pregnant')) {
       // Dead, unknown disabled
+      if (key === 'with_calf') {
+        return false; // With Calf enabled if Pregnant is checked
+      }
       return ['dead', 'cannot_found'].includes(key);
+    }
+    if (key === 'with_calf') {
+      // With Calf is only enabled if Pregnant is checked
+      return !selectedStatus.includes('pregnant');
     }
     if (selectedStatus.includes('surrendered')) {
       // Dead disabled
       return key === 'dead';
-    }
-    if (selectedStatus.includes('sold')) {
-      // Dead, pregnant, surrendered, unknown, with calf disabled
-      return ['dead', 'pregnant', 'surrendered', 'cannot_found', 'with_calf'].includes(key);
     }
     if (selectedStatus.includes('dead')) {
       // All others disabled
@@ -460,6 +462,14 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
     }
   };
 
+  // Optionally reset checkboxes when status changes
+  useEffect(() => {
+    if (!selectedStatus.includes('with_calf')) {
+      setIsRedispersalChecked(false);
+      setIsTransferChecked(false);
+    }
+  }, [selectedStatus]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
@@ -612,10 +622,13 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
                 {isLoadingBeneficiary ? (
                   <Text style={styles.livestockValue}>Loading...</Text>
                 ) : (
+                  // Fix: Always show type, fallback to livestockDetails.type if empty
                   <Text style={styles.livestockValue}>
-                    {Array.isArray(beneficiary.livestock) 
-                      ? beneficiary.livestock.join(', ') 
-                      : beneficiary.livestock || '—'}
+                    {beneficiary.livestock && typeof beneficiary.livestock === 'string'
+                      ? beneficiary.livestock
+                      : Array.isArray(beneficiary.livestock) && beneficiary.livestock.length > 0
+                        ? beneficiary.livestock.join(', ')
+                        : livestockDetails.type}
                   </Text>
                 )}
               </View>
@@ -664,224 +677,240 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
                 const isSelected = selectedStatus.includes(opt.key);
                 const isDisabled = isStatusDisabled(opt.key);
                 return (
-                  <TouchableOpacity
-                    key={opt.key}
-                    style={[
-                      styles.statusOptionCard,
-                      isSelected && styles.statusOptionCardSelected,
-                      isDisabled && styles.statusOptionCardDisabled
-                    ]}
-                    onPress={() => !isDisabled && toggleStatus(opt.key)}
-                    activeOpacity={0.7}
-                    disabled={isDisabled}
-                  >
-                    <View style={styles.statusOptionContent}>
-                      <View style={[styles.statusIconContainer, isDisabled && styles.statusIconContainerDisabled]}>
-                        <Ionicons 
-                          name={opt.icon} 
-                          size={20} 
-                          color={isDisabled ? colors.disabled : (isSelected ? colors.primary : colors.textLight)} 
-                        />
+                  <View key={opt.key}>
+                    <TouchableOpacity
+                      style={[
+                        styles.statusOptionCard,
+                        isSelected && styles.statusOptionCardSelected,
+                        isDisabled && styles.statusOptionCardDisabled
+                      ]}
+                      onPress={() => !isDisabled && toggleStatus(opt.key)}
+                      activeOpacity={0.7}
+                      disabled={isDisabled}
+                    >
+                      <View style={styles.statusOptionContent}>
+                        <View style={[styles.statusIconContainer, isDisabled && styles.statusIconContainerDisabled]}>
+                          <Ionicons 
+                            name={opt.icon} 
+                            size={20} 
+                            color={isDisabled ? colors.disabled : (isSelected ? colors.primary : colors.textLight)} 
+                          />
+                        </View>
+                        <Text style={[styles.statusOptionLabel, isSelected && styles.statusOptionLabelSelected, isDisabled && styles.statusOptionLabelDisabled]}>
+                          {opt.label}
+                        </Text>
+                        <View style={[styles.statusCheckbox, isSelected && styles.statusCheckboxSelected, isDisabled && styles.statusCheckboxDisabled]}>
+                          {isSelected && (
+                            <Ionicons name="checkmark" size={12} color={colors.white} />
+                          )}
+                        </View>
                       </View>
-                      <Text style={[styles.statusOptionLabel, isSelected && styles.statusOptionLabelSelected, isDisabled && styles.statusOptionLabelDisabled]}>
-                        {opt.label}
-                      </Text>
-                      <View style={[styles.statusCheckbox, isSelected && styles.statusCheckboxSelected, isDisabled && styles.statusCheckboxDisabled]}>
-                        {isSelected && (
-                          <Ionicons name="checkmark" size={12} color={colors.white} />
-                        )}
+                    </TouchableOpacity>
+                    {/* Add spacing between checkbox and date picker */}
+                    {opt.key === 'dead' && isSelected && (
+                      <View style={styles.statusDateFieldContainer}>
+                        <View style={styles.formCard}>
+                          <Text style={styles.formCardTitle}>Date of Death</Text>
+                          <TouchableOpacity
+                            style={[styles.datePickerButton, { borderColor: colors.border }]}
+                            onPress={() => setShowDeadDatePicker(true)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[styles.datePickerText, { color: deadDate ? colors.text : colors.textLight }]}> 
+                              {deadDate ? formatDate(deadDate) : 'Pick date of death'}
+                            </Text>
+                            <Ionicons name="calendar" size={20} color={colors.primary} />
+                          </TouchableOpacity>
+                          {showDeadDatePicker && (
+                            <DateTimePicker
+                              value={deadDate ? new Date(deadDate) : new Date()}
+                              mode="date"
+                              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                              onChange={(e, selected) => {
+                                setShowDeadDatePicker(false);
+                                if (selected) setDeadDate(formatDate(selected));
+                              }}
+                            />
+                          )}
+                        </View>
                       </View>
-                    </View>
-                  </TouchableOpacity>
+                    )}
+                    {opt.key === 'surrendered' && isSelected && (
+                      <View style={styles.statusDateFieldContainer}>
+                        <View style={styles.formCard}>
+                          <Text style={styles.formCardTitle}>Date Surrendered</Text>
+                          <TouchableOpacity
+                            style={[styles.datePickerButton, { borderColor: colors.border }]}
+                            onPress={() => setShowSurrenderedDatePicker(true)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[styles.datePickerText, { color: surrenderedDate ? colors.text : colors.textLight }]}> 
+                              {surrenderedDate ? formatDate(surrenderedDate) : 'Pick date surrendered'}
+                            </Text>
+                            <Ionicons name="calendar" size={20} color={colors.primary} />
+                          </TouchableOpacity>
+                          {showSurrenderedDatePicker && (
+                            <DateTimePicker
+                              value={surrenderedDate ? new Date(surrenderedDate) : new Date()}
+                              mode="date"
+                              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                              onChange={(e, selected) => {
+                                setShowSurrenderedDatePicker(false);
+                                if (selected) setSurrenderedDate(formatDate(selected));
+                              }}
+                            />
+                          )}
+                        </View>
+                      </View>
+                    )}
+                  </View>
                 );
               })}
             </View>
-            {/* Date fields for dead and surrendered */}
-            {selectedStatus.includes('dead') && (
-              <View style={styles.formCard}>
-                <Text style={styles.formCardTitle}>Date of Death</Text>
-                <TouchableOpacity
-                  style={[styles.datePickerButton, { borderColor: colors.border }]}
-                  onPress={() => setShowDeadDatePicker(true)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.datePickerText, { color: deadDate ? colors.text : colors.textLight }]}> 
-                    {deadDate ? formatDate(deadDate) : 'Pick date of death'}
-                  </Text>
-                  <Ionicons name="calendar" size={20} color={colors.primary} />
-                </TouchableOpacity>
-                {showDeadDatePicker && (
-                  <DateTimePicker
-                    value={deadDate ? new Date(deadDate) : new Date()}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(e, selected) => {
-                      setShowDeadDatePicker(false);
-                      if (selected) setDeadDate(formatDate(selected));
-                    }}
-                  />
-                )}
-              </View>
-            )}
-            {selectedStatus.includes('surrendered') && (
-              <View style={styles.formCard}>
-                <Text style={styles.formCardTitle}>Date Surrendered</Text>
-                <TouchableOpacity
-                  style={[styles.datePickerButton, { borderColor: colors.border }]}
-                  onPress={() => setShowSurrenderedDatePicker(true)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.datePickerText, { color: surrenderedDate ? colors.text : colors.textLight }]}> 
-                    {surrenderedDate ? formatDate(surrenderedDate) : 'Pick date surrendered'}
-                  </Text>
-                  <Ionicons name="calendar" size={20} color={colors.primary} />
-                </TouchableOpacity>
-                {showSurrenderedDatePicker && (
-                  <DateTimePicker
-                    value={surrenderedDate ? new Date(surrenderedDate) : new Date()}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(e, selected) => {
-                      setShowSurrenderedDatePicker(false);
-                      if (selected) setSurrenderedDate(formatDate(selected));
-                    }}
-                  />
-                )}
-              </View>
-            )}
-            {/* Monitoring date field */}
-            <View style={styles.formCard}>
-              <Text style={styles.formCardTitle}>Monitoring Date</Text>
-              <TouchableOpacity
-                style={[styles.datePickerButton, { borderColor: colors.border }]}
-                onPress={() => setShowMonitoringDatePicker(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.datePickerText, { color: monitoringDate ? colors.text : colors.textLight }]}> 
-                  {monitoringDate ? formatDate(monitoringDate) : 'Pick monitoring date'}
-                </Text>
-                <Ionicons name="calendar" size={20} color={colors.primary} />
-              </TouchableOpacity>
-              {showMonitoringDatePicker && (
-                <DateTimePicker
-                  value={monitoringDate ? new Date(monitoringDate) : new Date()}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={(e, selected) => {
-                    setShowMonitoringDatePicker(false);
-                    if (selected) setMonitoringDate(formatDate(selected));
-                  }}
-                />
-              )}
-            </View>
           </View>
 
-          {(selectedStatus.includes('pregnant') || selectedStatus.includes('with_calf') || selectedStatus.includes('sold')) && (
+          {(selectedStatus.includes('pregnant') || selectedStatus.includes('with_calf')) && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Additional Details</Text>
               
-          {selectedStatus.includes('pregnant') && (
+              {/* Pregnancy Information */}
+              {selectedStatus.includes('pregnant') && (
                 <View style={styles.formCard}>
                   <Text style={styles.formCardTitle}>Pregnancy Information</Text>
-              <TextInput
+                  <TextInput
                     style={styles.input}
                     placeholder="Enter months of pregnancy"
-                placeholderTextColor={colors.textLight}
-                value={monthsPregnant}
-                onChangeText={setMonthsPregnant}
-                keyboardType="numeric"
-              />
-                  
-              {selectedStatus.includes('with_calf') && (
-                <>
-                  <TextInput
+                    placeholderTextColor={colors.textLight}
+                    value={monthsPregnant}
+                    onChangeText={setMonthsPregnant}
+                    keyboardType="numeric"
+                  />
+                  {/* If also with_calf, show calf fields and checkboxes */}
+                  {selectedStatus.includes('with_calf') && (
+                    <>
+                      <TextInput
                         style={styles.input}
                         placeholder="Enter calf age (months)"
-                    placeholderTextColor={colors.textLight}
-                    value={calfAge}
-                    onChangeText={setCalfAge}
-                    keyboardType="numeric"
-                  />
-                  <TextInput
+                        placeholderTextColor={colors.textLight}
+                        value={calfAge}
+                        onChangeText={setCalfAge}
+                        keyboardType="numeric"
+                      />
+                      <TextInput
                         style={styles.input}
                         placeholder="Enter number of calves"
-                    placeholderTextColor={colors.textLight}
-                    value={numCalf}
-                    onChangeText={setNumCalf}
-                    keyboardType="numeric"
-                  />
-                </>
-              )}
-            </View>
-          )}
-
-          {!selectedStatus.includes('pregnant') && selectedStatus.includes('with_calf') && (
-                <View style={styles.formCard}>
-                  <Text style={styles.formCardTitle}>Calf Information</Text>
-              <TextInput
-                    style={styles.input}
-                    placeholder="Enter calf age (months)"
-                placeholderTextColor={colors.textLight}
-                value={calfAge}
-                onChangeText={setCalfAge}
-                keyboardType="numeric"
-              />
-              <TextInput
-                    style={styles.input}
-                    placeholder="Enter number of calves"
-                placeholderTextColor={colors.textLight}
-                value={numCalf}
-                onChangeText={setNumCalf}
-                keyboardType="numeric"
-              />
-            </View>
-          )}
-
-          {selectedStatus.includes('sold') && (
-            <View style={styles.formCard}>
-              <Text style={styles.formCardTitle}>Sale Information</Text>
-              <Text style={styles.formCardSubtitle}>
-                Beneficiary's Share – 30% (B30%S)
-              </Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter amount sold (₱)"
-                placeholderTextColor={colors.textLight}
-                value={soldAmount}
-                onChangeText={setSoldAmount}
-                keyboardType="numeric"
-              />
-              {soldAmount !== '' && !isNaN(Number(soldAmount)) && (
-                <View style={styles.calculationCard}>
-                  <Text style={styles.calculationLabel}>30% Share:</Text>
-                  <Text style={styles.calculationValue}>
-                    ₱{Number(soldAmount) * 0.3}
-                  </Text>
+                        placeholderTextColor={colors.textLight}
+                        value={numCalf}
+                        onChangeText={setNumCalf}
+                        keyboardType="numeric"
+                      />
+                      {/* Professional checkboxes for Re-dispersal and Transfer (checkbox on right, mutually exclusive) */}
+                      <View style={styles.checkboxColumn}>
+                        <TouchableOpacity
+                          style={[
+                            styles.checkboxProfessional,
+                            isRedispersalChecked && styles.checkboxProfessionalChecked,
+                          ]}
+                          activeOpacity={0.8}
+                          onPress={() => {
+                            setIsRedispersalChecked(v => !v);
+                            if (!isRedispersalChecked) setIsTransferChecked(false);
+                          }}
+                        >
+                          <View style={styles.checkboxLabelRow}>
+                            <Ionicons name="share-outline" size={18} color={colors.primary} style={{ marginRight: 8 }} />
+                            <Text style={styles.redispersalText}>Re-dispersal</Text>
+                          </View>
+                          <View style={[
+                            styles.checkboxBoxProfessional,
+                            isRedispersalChecked && styles.checkboxBoxProfessionalChecked
+                          ]}>
+                            {isRedispersalChecked && (
+                              <Ionicons name="checkmark" size={16} color={colors.white} />
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.checkboxProfessional,
+                            isTransferChecked && styles.checkboxProfessionalChecked,
+                          ]}
+                          activeOpacity={0.8}
+                          onPress={() => {
+                            setIsTransferChecked(v => !v);
+                            if (!isTransferChecked) setIsRedispersalChecked(false);
+                          }}
+                        >
+                          <View style={styles.checkboxLabelRow}>
+                            <Ionicons name="swap-horizontal-outline" size={18} color={colors.primary} style={{ marginRight: 8 }} />
+                            <Text style={styles.transferText}>Transfer</Text>
+                          </View>
+                          <View style={[
+                            styles.checkboxBoxProfessional,
+                            isTransferChecked && styles.checkboxBoxProfessionalChecked
+                          ]}>
+                            {isTransferChecked && (
+                              <Ionicons name="checkmark" size={16} color={colors.white} />
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
                 </View>
               )}
-              <TouchableOpacity
-                style={[styles.datePickerButton, { borderColor: colors.border }]}
-                onPress={() => setShowSoldDatePicker(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.datePickerText, { color: soldDate ? colors.text : colors.textLight }]}> 
-                  {soldDate ? formatDate(soldDate) : 'Pick date sold'}
-                </Text>
-                <Ionicons name="calendar" size={20} color={colors.primary} />
-              </TouchableOpacity>
-              {showSoldDatePicker && (
-                <DateTimePicker
-                  value={soldDate ? new Date(soldDate) : new Date()}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={(e, selected) => {
-                    setShowSoldDatePicker(false);
-                    if (selected) setSoldDate(formatDate(selected));
-                  }}
-                />
-              )}
+
+              
             </View>
           )}
+
+          {/* Record Cull/Slaughter section, only show when beneficiary is being edited */}
+          {isEditingBeneficiary && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Record Cull/Slaughter</Text>
+              <View style={styles.formCard}>
+                <Text style={styles.formCardTitle}>Sale Information</Text>
+                <Text style={styles.formCardSubtitle}>
+                  Beneficiary's Share – 30% (B30%S)
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter amount sold (₱)"
+                  placeholderTextColor={colors.textLight}
+                  value={soldAmount}
+                  onChangeText={setSoldAmount}
+                  keyboardType="numeric"
+                />
+                {soldAmount !== '' && !isNaN(Number(soldAmount)) && (
+                  <View style={styles.calculationCard}>
+                    <Text style={styles.calculationLabel}>30% Share:</Text>
+                    <Text style={styles.calculationValue}>
+                      ₱{Number(soldAmount) * 0.3}
+                    </Text>
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={[styles.datePickerButton, { borderColor: colors.border }]}
+                  onPress={() => setShowSoldDatePicker(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.datePickerText, { color: soldDate ? colors.text : colors.textLight }]}> 
+                    {soldDate ? formatDate(soldDate) : 'Pick date sold'}
+                  </Text>
+                  <Ionicons name="calendar" size={20} color={colors.primary} />
+                </TouchableOpacity>
+                {showSoldDatePicker && (
+                  <DateTimePicker
+                    value={soldDate ? new Date(soldDate) : new Date()}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(e, selected) => {
+                      setShowSoldDatePicker(false);
+                      if (selected) setSoldDate(formatDate(selected));
+                    }}
+                  />
+                )}
+              </View>
             </View>
           )}
 
@@ -971,38 +1000,20 @@ export default function Status({ onBackToTransactions, navigation, scannedUID })
 
           <View style={styles.otherConfigSection}>
             <Text style={styles.otherConfigText}>
-            OTHER STATUS CONFIGURATION
-          </Text>
-                          <View style={styles.configButtonsContainer}>
-                <TouchableOpacity 
-                  style={styles.cullingButton} 
-                  activeOpacity={0.7}
-                  onPress={handleCullingPress}
-                >
-                  <Ionicons name="cut-outline" size={20} color={colors.secondary} />
-                  <Text style={styles.cullingText}>Culling</Text>
-                </TouchableOpacity>
-                {selectedStatus.includes('with_calf') && (
-                  <>
-                    <TouchableOpacity 
-                      style={styles.redispersalButton} 
-                      activeOpacity={0.7}
-                      onPress={handleRedispersalPress}
-                    >
-                      <Ionicons name="share-outline" size={20} color={colors.primary} />
-                      <Text style={styles.redispersalText}>Re-dispersal</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={styles.transferButton} 
-                      activeOpacity={0.7}
-                      onPress={handleTransferPress}
-                    >
-                      <Ionicons name="swap-horizontal-outline" size={20} color="#25A18E" />
-                      <Text style={styles.transferText}>Transfer</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-              </View>
+              OTHER STATUS CONFIGURATION
+            </Text>
+            <View style={styles.configButtonsContainer}>
+              <TouchableOpacity 
+                style={styles.cullingButton} 
+                activeOpacity={0.7}
+                onPress={handleCullingPress}
+              >
+                <Ionicons name="cut-outline" size={20} color={colors.secondary} />
+                <Text style={styles.cullingText}>Culling</Text>
+              </TouchableOpacity>
+              {/* Remove Re-Dispersal and Transfer checkboxes from here */}
+              {/* They are now inside Calf Information */}
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -1510,6 +1521,39 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 8,
   },
+  // Add checkbox styles
+  checkboxOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  checkboxHalf: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: '48%',
+  },
+  checkboxBox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#25A18E',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  checkboxBoxChecked: {
+    backgroundColor: '#25A18E',
+    borderColor: '#25A18E',
+  },
   redispersalButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1522,9 +1566,10 @@ const styles = StyleSheet.create({
   },
   redispersalText: {
     color: '#25A18E',
-    fontWeight: '700',
-    fontSize: 16,
-    marginLeft: 8,
+    fontWeight: '600',
+    fontSize: 14,
+    marginLeft: 6,
+    flexShrink: 1,
   },
   transferButton: {
     flexDirection: 'row',
@@ -1538,9 +1583,10 @@ const styles = StyleSheet.create({
   },
   transferText: {
     color: '#25A18E',
-    fontWeight: '700',
-    fontSize: 16,
-    marginLeft: 8,
+    fontWeight: '600',
+    fontSize: 14,
+    marginLeft: 6,
+    flexShrink: 1,
   },
   uidContainer: {
     flexDirection: 'row',
@@ -1565,5 +1611,84 @@ const styles = StyleSheet.create({
   healthStatus: {
     color: '#4CAF50',
     fontWeight: '600',
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginTop: 8,
+    marginBottom: 0,
+    gap: 0,
+  },
+  // Add new styles for vertical full-width checkboxes
+  checkboxColumn: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    marginTop: 8,
+    gap: 0,
+  },
+  checkboxOptionFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#25A18E',
+    width: '100%',
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  statusDateFieldContainer: {
+    marginTop: 12, // Add spacing above the date field
+    alignSelf: 'stretch', // Make sure it aligns with the checkbox width
+  },
+  // Add/replace these styles for professional checkboxes
+  checkboxProfessional: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1.5,
+    borderColor: '#25A18E',
+    marginBottom: 10,
+    elevation: 1,
+    shadowColor: '#25A18E',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    justifyContent: 'space-between', // <-- Add this for right-aligned checkbox
+  },
+  checkboxProfessionalChecked: {
+    backgroundColor: '#e6f4f1',
+    borderColor: '#25A18E',
+    elevation: 2,
+    shadowOpacity: 0.12,
+  },
+  checkboxLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  checkboxBoxProfessional: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#25A18E',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+    // Remove marginRight, add marginLeft for right alignment
+    transitionProperty: 'background-color, border-color',
+    transitionDuration: '150ms',
+  },
+  checkboxBoxProfessionalChecked: {
+    backgroundColor: '#25A18E',
+    borderColor: '#25A18E',
   },
 });

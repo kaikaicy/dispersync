@@ -134,7 +134,7 @@ export default function Cull({ onBackToTransactions }) {
         { backgroundColor: colors.white, borderColor: colors.border },
         isSelected && { borderColor: colors.primary, backgroundColor: colors.background }
       ]}
-      onPress={() => onSelect(option.key)}
+      onPress={() => onSelect(isSelected ? '' : option.key)} // Toggle selection
       activeOpacity={0.7}
     >
       <View style={styles.optionContent}>
@@ -225,35 +225,7 @@ export default function Cull({ onBackToTransactions }) {
             />
           </View>
 
-          {/* Cull Details Section */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.primary }]}>Cull Details</Text>
-            <Text style={[styles.sectionSubtitle, { color: colors.textLight }]}>
-              Information about the culling process
-            </Text>
-            
-            <Text style={[styles.inputLabel, { color: colors.primary }]}>Cull Date</Text>
-            <TouchableOpacity
-              style={[styles.datePickerButton, { borderColor: colors.border }]}
-              onPress={() => setShowCullDatePicker(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.datePickerText, { color: cullDate ? colors.text : colors.textLight }]}>
-                {cullDate ? formatDateDisplay(cullDate) : 'Select cull date'}
-              </Text>
-              <Ionicons name="calendar" size={20} color={colors.primary} />
-            </TouchableOpacity>
-
-            <Text style={[styles.inputLabel, { color: colors.primary }]}>Cull Reason</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-              placeholder="Enter reason for culling"
-              placeholderTextColor={colors.textLight}
-              value={cullReason}
-              onChangeText={setCullReason}
-            />
-
-          </View>
+          
 
           {/* Toggle Tabs */}
           <View style={styles.section}>
@@ -307,39 +279,69 @@ export default function Cull({ onBackToTransactions }) {
                 )}
               </View>
 
-              <Text style={[styles.inputLabel, { color: colors.primary }]}>Amount sold (₱)</Text>
-              <TextInput
-                style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-                placeholder="Enter amount sold"
-                placeholderTextColor={colors.textLight}
-                value={saleAmount}
-                onChangeText={setSaleAmount}
-                keyboardType="numeric"
-              />
-              
-              {/* Beneficiary 30% Share Calculation */}
-              {saleAmount && !isNaN(parseFloat(saleAmount)) && (
-                <View style={styles.calculationContainer}>
-                  <Text style={[styles.calculationLabel, { color: colors.textLight }]}>
-                    Beneficiary 30% Share
-                  </Text>
-                  <Text style={[styles.calculationAmount, { color: colors.primary }]}>
-                    ₱{(parseFloat(saleAmount) * 0.3).toFixed(2)}
-                  </Text>
-                </View>
+              {/* Show fields only for officer or vet office */}
+              {(selectedSoldOption === 'dispersal_officer' || selectedSoldOption === 'veterinary_office') && (
+                <>
+                  <Text style={[styles.inputLabel, { color: colors.primary }]}>Amount sold (₱)</Text>
+                  <TextInput
+                    style={[styles.input, { borderColor: colors.border, color: colors.text }]}
+                    placeholder="Enter amount sold"
+                    placeholderTextColor={colors.textLight}
+                    value={saleAmount}
+                    onChangeText={setSaleAmount}
+                    keyboardType="numeric"
+                  />
+                  <Text style={[styles.inputLabel, { color: colors.primary }]}>Sale Date</Text>
+                  <TouchableOpacity
+                    style={[styles.datePickerButton, { borderColor: colors.border }]}
+                    onPress={() => setShowSaleDatePicker(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.datePickerText, { color: saleDate ? colors.text : colors.textLight }]}>
+                      {saleDate ? formatDateDisplay(saleDate) : 'Select sale date'}
+                    </Text>
+                    <Ionicons name="calendar" size={20} color={colors.primary} />
+                  </TouchableOpacity>
+                  {/* Beneficiary 30% Share Calculation */}
+                  {saleAmount && !isNaN(parseFloat(saleAmount)) && (
+                    <View style={styles.calculationContainer}>
+                      <Text style={[styles.calculationLabel, { color: colors.textLight }]}>
+                        Beneficiary 30% Share
+                      </Text>
+                      <Text style={[styles.calculationAmount, { color: colors.primary }]}>
+                        ₱{(parseFloat(saleAmount) * 0.3).toFixed(2)}
+                      </Text>
+                    </View>
+                  )}
+                </>
               )}
 
-              <Text style={[styles.inputLabel, { color: colors.primary }]}>Sale Date</Text>
-              <TouchableOpacity
-                style={[styles.datePickerButton, { borderColor: colors.border }]}
-                onPress={() => setShowSaleDatePicker(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.datePickerText, { color: saleDate ? colors.text : colors.textLight }]}>
-                  {saleDate ? formatDateDisplay(saleDate) : 'Select sale date'}
-                </Text>
-                <Ionicons name="calendar" size={20} color={colors.primary} />
-              </TouchableOpacity>
+              {/* Only show this section if Beneficiary is selected */}
+              {selectedSoldOption === 'beneficiary' && (
+                <View style={[styles.section, { backgroundColor: colors.background, borderRadius: 12, padding: 12 }]}>
+                  <Text style={[styles.inputLabel, { color: colors.primary }]}>
+                    Beneficiary's Share – 30% (B30%S)
+                  </Text>
+                  <TextInput
+                    style={[styles.input, { borderColor: colors.border, color: colors.text }]}
+                    placeholder="Enter amount sold (₱)"
+                    placeholderTextColor={colors.textLight}
+                    value={saleAmount}
+                    onChangeText={setSaleAmount}
+                    keyboardType="numeric"
+                  />
+                  <TouchableOpacity
+                    style={[styles.datePickerButton, { borderColor: colors.border }]}
+                    onPress={() => setShowSaleDatePicker(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.datePickerText, { color: saleDate ? colors.text : colors.textLight }]}>
+                      {saleDate ? formatDateDisplay(saleDate) : 'Pick date sold'}
+                    </Text>
+                    <Ionicons name="calendar" size={20} color={colors.primary} />
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
 

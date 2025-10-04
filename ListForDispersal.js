@@ -442,9 +442,6 @@ export default function ListForDispersal({ highlightScheduleId, onScanPress }) {
                   <Ionicons name="scan" size={16} color="#fff" style={{ marginRight: 4 }} />
                   <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Scan</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setIsModalVisible(false)}>
-                  <Ionicons name="close" size={24} color="#666" />
-                </TouchableOpacity>
               </View>
             </View>
 
